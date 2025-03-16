@@ -30,6 +30,7 @@ def start_algorithm():
     mu = mu_entry.get()
     L = L_entry.get()
     snr = snr_entry.get()
+    noise_type = noise_var.get()
 
     try:
         mu = float(mu)
@@ -41,7 +42,7 @@ def start_algorithm():
         return
 
     # Run ANC in a separate thread
-    threading.Thread(target=run_anc, args=(algorithm, L, mu, snr, update_progress, on_anc_complete), daemon=True).start()
+    threading.Thread(target=run_anc, args=(algorithm, L, mu, snr, noise_type, update_progress, on_anc_complete), daemon=True).start()
 
 def disable_buttons():
     """Disable buttons during processing."""
@@ -157,38 +158,43 @@ tk.Label(root, text="L:").grid(row=2, column=0)
 L_entry = tk.Entry(root)
 L_entry.grid(row=2, column=1)
 
-tk.Label(root, text="SNR (dB):").grid(row=3, column=0)
+tk.Label(root, text="Select Noise Type:").grid(row=3, column=0)
+noise_var = tk.StringVar(value="White")
+noise_menu = ttk.Combobox(root, textvariable=noise_var, values=["White", "Pink", "Brownian", "Violet", "Grey", "Blue"])
+noise_menu.grid(row=3, column=1)
+
+tk.Label(root, text="SNR (dB):").grid(row=4, column=0)
 snr_entry = tk.Entry(root)
-snr_entry.grid(row=3, column=1)
+snr_entry.grid(row=4, column=1)
 
 start_button = tk.Button(root, text="Start", command=start_algorithm)
-start_button.grid(row=4, column=0, columnspan=2)
+start_button.grid(row=5, column=0, columnspan=2)
 
 play_noisy_btn = tk.Button(root, text="Play Noisy Signal", state=tk.DISABLED, command=play_noisy_signal)
-play_noisy_btn.grid(row=5, column=0)
+play_noisy_btn.grid(row=6, column=0)
 
 play_filtered_btn = tk.Button(root, text="Play Filtered Signal", state=tk.DISABLED, command=play_filtered_signal)
-play_filtered_btn.grid(row=5, column=1)
+play_filtered_btn.grid(row=6, column=1)
 
 graph_button = tk.Button(root, text="Graphs", state=tk.DISABLED, command=open_graphs)
-graph_button.grid(row=6, column=0, columnspan=2)
+graph_button.grid(row=7, column=0, columnspan=2)
 
 status_label = tk.Label(root, text="", fg="black")
-status_label.grid(row=7, column=0, columnspan=2)
+status_label.grid(row=8, column=0, columnspan=2)
 
 time_label = tk.Label(root, text="Time remaining: 00:00", fg="black")
-time_label.grid(row=8, column=0, columnspan=2)
+time_label.grid(row=9, column=0, columnspan=2)
 
 progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)
-progress_bar.grid(row=9, column=0, columnspan=2, pady=10)
+progress_bar.grid(row=10, column=0, columnspan=2, pady=10)
 
 total_time_label = tk.Label(root, text="Total Time: --")
-total_time_label.grid(row=10, column=0, columnspan=2)
+total_time_label.grid(row=11, column=0, columnspan=2)
 
 conv_time_label = tk.Label(root, text="Convergence Speed: --")
-conv_time_label.grid(row=11, column=0, columnspan=2)
+conv_time_label.grid(row=12, column=0, columnspan=2)
 
 error_label = tk.Label(root, text="Steady-State Error: --")
-error_label.grid(row=12, column=0, columnspan=2)
+error_label.grid(row=13, column=0, columnspan=2)
 
 root.mainloop()

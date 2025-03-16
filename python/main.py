@@ -1,26 +1,26 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
-from tqdm import tqdm
+#from tqdm import tqdm
 import sys
 import time
 from algorithms.lms import LMS
 from algorithms.nlms import NLMS
 from algorithms.fxlms import FxLMS
 from algorithms.fxnlms import FxNLMS
-from utils.noise import add_noise
+from utils.noise import generate_white_noise, generate_pink_noise, generate_brownian_noise, generate_violet_noise, generate_grey_noise, generate_blue_noise
 from utils.smoothing import smooth_signal
 from utils.convert_to_dbfs import convert_to_dbfs
 
-def run_anc(algorithm_name, L, mu, snr, progress_callback, completion_callback):
+def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completion_callback):
     """Run ANC process and update progress in real time."""
     
     # Start measuring execution time
     start_time = time.time()
 
     # Load system impulse responses
-    primary_path = loadmat("primary_path.mat")['sim_imp'].flatten()[:4000]
-    secondary_path = loadmat("secondary_path.mat")['sim_imp'].flatten()[:2000]
+    primary_path = loadmat("python/primary_path.mat")['sim_imp'].flatten()[:4000]
+    secondary_path = loadmat("python/secondary_path.mat")['sim_imp'].flatten()[:2000]
 
     # Generate input signal
     fs = 44100
@@ -28,8 +28,21 @@ def run_anc(algorithm_name, L, mu, snr, progress_callback, completion_callback):
     t = np.arange(0, duration, 1/fs)
     reference_signal = np.sin(2 * np.pi * 500 * t)
 
-    # Add noise with user-defined SNR
-    noisy_signal = add_noise(reference_signal, snr)
+    # Select noise type
+    noise_generators = {
+        "White": generate_white_noise,
+        "Pink": generate_pink_noise,
+        "Brownian": generate_brownian_noise,
+        "Violet": generate_violet_noise,
+        "Grey": generate_grey_noise,
+        "Blue": generate_blue_noise,
+    }
+
+    if noise_type not in noise_generators:
+        print(f"Error: Unknown noise type '{noise_type}'")
+        sys.exit(1)
+
+    noisy_signal = noise_generators[noise_type](reference_signal, snr)
 
     # Select the algorithm
     if algorithm_name == "LMS":
@@ -49,7 +62,7 @@ def run_anc(algorithm_name, L, mu, snr, progress_callback, completion_callback):
     error_signal = np.zeros(len(noisy_signal))
     primary_output = np.convolve(noisy_signal, primary_path, mode='full')[:len(noisy_signal)]
 
-    for n in tqdm(range(len(noisy_signal))):
+    for n in range(len(noisy_signal)):
         error_signal[n], filtered_signal[n] = algorithm.estimate(noisy_signal[n], primary_output[n])
 
         # Update progress
