@@ -61,8 +61,13 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     error_signal = np.zeros(len(noisy_signal))
     primary_output = np.convolve(noisy_signal, primary_path, mode='full')[:len(noisy_signal)]
 
+    if algorithm_name == "FxLMS" or algorithm_name == "FxNLMS":
+        secondary_output = np.convolve(primary_output, secondary_path, mode='full')[:len(noisy_signal)]
+    else:
+        secondary_output = primary_output
+
     for n in range(len(noisy_signal)):
-        error_signal[n], filtered_signal[n] = algorithm.estimate(noisy_signal[n], primary_output[n])
+        error_signal[n], filtered_signal[n] = algorithm.estimate(secondary_output[n], noisy_signal[n])
 
         # Update progress
         if n % (len(noisy_signal) // 100) == 0:
@@ -80,14 +85,14 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     threshold = np.mean(np.abs(error_signal)) * 0.1  # 10% of average error
 
     # Require error to stay below threshold for at least 0.5 seconds to count as convergence
-    window_size = int(0.05 * fs)  # 0.5 seconds window
+    window_size = int(0.05 * fs)  # 0.05 seconds window
 
     for conv_idx in range(len(error_signal) - window_size):
         if np.all(np.abs(error_signal[conv_idx:conv_idx + window_size]) < threshold):
             convergence_time = conv_idx / fs  # Convert index to seconds
             break
     else:
-        convergence_time = total_execution_time  # If no convergence detected
+        convergence_time = duration  # If no convergence detected
 
     # Compute steady-state error (last 20% of the time)
     last_20_percent_samples = int(0.2 * len(error_signal))

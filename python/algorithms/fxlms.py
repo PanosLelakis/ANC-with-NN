@@ -18,7 +18,8 @@ class FxLMS:
 
     def estimate(self, x, d):
         y = self.predict(x)
-        filtered_x = np.convolve(x, self.secondary_path_impulse_response, mode='full')[-self.L:]
+        #filtered_x = np.convolve(x, self.secondary_path_impulse_response, mode='full')[-self.L:]
+        filtered_x = x
         e = d - y
         self.adapt(e, filtered_x)
         return e, y
