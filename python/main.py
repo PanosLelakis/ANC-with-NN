@@ -13,7 +13,6 @@ from utils.smoothing import smooth_signal
 from utils.convert_to_dbfs import convert_to_dbfs
 
 def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completion_callback):
-    """Run ANC process and update progress in real time."""
     
     # Start measuring execution time
     start_time = time.time()
@@ -44,7 +43,7 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
 
     noisy_signal = noise_generators[noise_type](reference_signal, snr)
 
-    # Select the algorithm
+    # Select algorithm
     if algorithm_name == "LMS":
         algorithm = LMS(L, mu)
     elif algorithm_name == "NLMS":
@@ -78,14 +77,17 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     end_time = time.time()
     total_execution_time = end_time - start_time
 
-    # Compute convergence speed
-    threshold = 0.01 * np.max(np.abs(error_signal))  # Define convergence threshold (1% of max error)
-    for conv_idx in range(len(error_signal)):
-        if np.abs(error_signal[conv_idx]) < threshold:
-            convergence_time = conv_idx / fs
+    threshold = np.mean(np.abs(error_signal)) * 0.1  # 10% of average error
+
+    # Require error to stay below threshold for at least 0.5 seconds to count as convergence
+    window_size = int(0.05 * fs)  # 0.5 seconds window
+
+    for conv_idx in range(len(error_signal) - window_size):
+        if np.all(np.abs(error_signal[conv_idx:conv_idx + window_size]) < threshold):
+            convergence_time = conv_idx / fs  # Convert index to seconds
             break
     else:
-        convergence_time = total_execution_time  # If it never converges, set it to total time
+        convergence_time = total_execution_time  # If no convergence detected
 
     # Compute steady-state error (last 20% of the time)
     last_20_percent_samples = int(0.2 * len(error_signal))
@@ -95,7 +97,6 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     completion_callback(reference_signal, noisy_signal, filtered_signal, error_signal, t, total_execution_time, convergence_time, steady_state_error)
 
 def plot_results(reference_signal, noisy_signal, filtered_signal, error_signal, t):
-    """Displays the results in a matplotlib figure using precomputed signals."""
     
     # Convert signals to dBFS
     max_val = np.max(np.abs(reference_signal))

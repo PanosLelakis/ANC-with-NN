@@ -2,9 +2,9 @@ OK # 2 methods: predict (w * u)
 OK # adapt (weight update w = w + ...)
 OK # secondary sim_imp fewer samples
 OK # maybe for primary path too
-# white, pink, inverse of pink noise (maybe violet)
+OK # white, pink, inverse of pink noise (maybe violet)
 # thorough report with equations, results and comparison between graphs (noises, algorithms etc)
-# performance evaluation function (report steady state error last 2 secs of 10 secs total time in dB + convergence speed in secs(how ))
+OK # performance evaluation function (report steady state error last 2 secs of 10 secs total time in dB + convergence speed in secs(how ))
 OK # vertical axis in dBfs
 # show error in frequency domain using bandpass filters (custom for user) - different order filter depending on length frequency band (designIIR) - passband stable no ripples
 # especially 3-5 kHz one band

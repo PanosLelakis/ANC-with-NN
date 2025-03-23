@@ -20,7 +20,6 @@ convergence_speed = 0  # Store convergence time
 steady_state_error = 0  # Store steady-state error
 
 def start_algorithm():
-    """Start ANC in a separate thread to avoid blocking the GUI."""
     global start_time
     disable_buttons()
     start_time = time.time()
@@ -41,23 +40,23 @@ def start_algorithm():
         enable_buttons()
         return
 
-    # Run ANC in a separate thread
+    # Run ANC in separate thread to avoid blocking GUI
     threading.Thread(target=run_anc, args=(algorithm, L, mu, snr, noise_type, update_progress, on_anc_complete), daemon=True).start()
 
 def disable_buttons():
-    """Disable buttons during processing."""
+    # Disable buttons during processing
     start_button.config(state=tk.DISABLED)
     play_noisy_btn.config(state=tk.DISABLED)
     play_filtered_btn.config(state=tk.DISABLED)
     graph_button.config(state=tk.DISABLED)
 
 def enable_buttons():
-    """Enable buttons after processing."""
+    # Enable buttons after processing
     start_button.config(state=tk.NORMAL)
     graph_button.config(state=tk.NORMAL)
 
 def update_progress(progress):
-    """Update the progress bar and estimated time."""
+    # Update progress bar and estimated time
     root.after(0, lambda: progress_var.set(progress))  # Ensure thread-safe update
     elapsed_time = time.time() - start_time
     estimated_time = (elapsed_time / progress) * (100 - progress) if progress > 0 else 0
@@ -65,14 +64,14 @@ def update_progress(progress):
     root.after(0, lambda: time_label.config(text=f"Time remaining: {minutes:02}:{seconds:02}"))
 
 def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signal, t, exec_time, conv_time, steady_error):
-    """Callback when ANC finishes."""
+    # Callback when ANC finishes
     global noisy_audio, filtered_audio, total_time, convergence_speed, steady_state_error, stored_t
     global stored_reference_signal, stored_error_signal
 
     noisy_audio = noisy_signal
     filtered_audio = filtered_signal
-    stored_reference_signal = reference_signal  # Store the reference signal
-    stored_error_signal = error_signal  # Store the correct error signal
+    stored_reference_signal = reference_signal
+    stored_error_signal = error_signal
     stored_t = t
 
     total_time = exec_time
@@ -90,12 +89,10 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     root.after(0, lambda: error_label.config(text=f"Steady-State Error: {steady_state_error:.2f} dB"))
 
 def open_graphs():
-    """Open the graphs using precomputed signals."""
     global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t
     root.after(0, lambda: plot_results(stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t))
 
 def play_noisy_signal():
-    """Play the noisy signal and re-enable the buttons afterward."""
     global is_playing
     if is_playing:
         return
@@ -111,7 +108,7 @@ def play_noisy_signal():
         except Exception as e:
             print(f"Error playing noisy signal: {e}")
         finally:
-            # Re-enable play buttons but keep "Graphs" enabled
+            # Re-enable play buttons but keep Graphs enabled
             root.after(0, lambda: play_noisy_btn.config(state=tk.NORMAL))
             root.after(0, lambda: play_filtered_btn.config(state=tk.NORMAL))
             global is_playing
@@ -120,7 +117,6 @@ def play_noisy_signal():
     threading.Thread(target=play, daemon=True).start()
 
 def play_filtered_signal():
-    """Play the filtered signal and re-enable the buttons afterward."""
     global is_playing
     if is_playing:
         return
