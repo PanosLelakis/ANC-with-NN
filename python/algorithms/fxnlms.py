@@ -15,7 +15,7 @@ class FxNLMS:
 
     def adapt(self, error, filtered_x):
         norm_factor = np.dot(filtered_x, filtered_x) + 1e-8
-        self.w = self.w - (self.mu / norm_factor) * error * filtered_x
+        self.w += (self.mu / norm_factor) * error * filtered_x
 
     def estimate(self, x, d):
         y = self.predict(x)

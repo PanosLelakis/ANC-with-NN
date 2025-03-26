@@ -1,7 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.io import loadmat
-#from tqdm import tqdm
 import sys
 import time
 from algorithms.lms import LMS
@@ -9,8 +7,7 @@ from algorithms.nlms import NLMS
 from algorithms.fxlms import FxLMS
 from algorithms.fxnlms import FxNLMS
 from utils.noise import generate_white_noise, generate_pink_noise, generate_brownian_noise, generate_violet_noise, generate_grey_noise, generate_blue_noise
-from utils.smoothing import smooth_signal
-from utils.convert_to_dbfs import convert_to_dbfs
+from utils.performance_metrics import compute_convergence_time, compute_steady_state_error
 
 def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completion_callback):
     
@@ -82,72 +79,9 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     end_time = time.time()
     total_execution_time = end_time - start_time
 
-    threshold = np.mean(np.abs(error_signal)) * 0.1  # 10% of average error
-
-    # Require error to stay below threshold for at least 0.5 seconds to count as convergence
-    window_size = int(0.05 * fs)  # 0.05 seconds window
-
-    for conv_idx in range(len(error_signal) - window_size):
-        if np.all(np.abs(error_signal[conv_idx:conv_idx + window_size]) < threshold):
-            convergence_time = conv_idx / fs  # Convert index to seconds
-            break
-    else:
-        convergence_time = duration  # If no convergence detected
-
-    # Compute steady-state error (last 20% of the time)
-    last_20_percent_samples = int(0.2 * len(error_signal))
-    steady_state_error = 10 * np.log10(np.mean(error_signal[-last_20_percent_samples:] ** 2) + 1e-10)  # dB
+    # Compute performance metrics
+    convergence_time = compute_convergence_time(error_signal, fs)
+    steady_state_error = compute_steady_state_error(error_signal, fs)
 
     # Send results to GUI callback
     completion_callback(reference_signal, noisy_signal, filtered_signal, error_signal, t, total_execution_time, convergence_time, steady_state_error)
-
-def plot_results(reference_signal, noisy_signal, filtered_signal, error_signal, t):
-    
-    # Convert signals to dBFS
-    max_val = np.max(np.abs(reference_signal))
-    reference_signal_dbfs = convert_to_dbfs(reference_signal, max_val)
-    noisy_signal_dbfs = convert_to_dbfs(noisy_signal, max_val)
-    filtered_signal_dbfs = convert_to_dbfs(filtered_signal, max_val)
-    error_signal_dbfs = convert_to_dbfs(error_signal, max_val)
-
-    # Smoothed signals for visualization
-    reference_signal_dbfs_median = smooth_signal(reference_signal_dbfs, 401)
-    noisy_signal_dbfs_median = smooth_signal(noisy_signal_dbfs, 401)
-    filtered_signal_dbfs_median = smooth_signal(filtered_signal_dbfs, 401)
-    error_signal_dbfs_median = smooth_signal(error_signal_dbfs, 401)
-
-    # Plot results
-    plt.figure() #figsize=(10, 6)
-
-    plt.subplot(3,1,1)
-    plt.plot(t, reference_signal, label="Original Signal", alpha=0.5)
-    plt.plot(t, noisy_signal, label="Noisy Signal", alpha=0.5)
-    plt.plot(t, filtered_signal, label="Filtered Signal", alpha=0.5)
-    plt.plot(t, error_signal, label="Error Signal", alpha=0.5)
-    plt.legend()
-    plt.xlabel("Time (s)")
-    plt.ylabel("Amplitude (Volt)")
-    plt.grid()
-
-    plt.subplot(3,1,2)
-    plt.plot(t, reference_signal_dbfs, label="Original Signal", alpha=0.5)
-    plt.plot(t, noisy_signal_dbfs, label="Noisy Signal", alpha=0.5)
-    plt.plot(t, filtered_signal_dbfs, label="Filtered Signal", alpha=0.5)
-    plt.plot(t, error_signal_dbfs, label="Error Signal", alpha=0.5)
-    plt.legend()
-    plt.xlabel("Time (s)")
-    plt.ylabel("Amplitude (dBFS)")
-    plt.grid()
-
-    plt.subplot(3,1,3)
-    plt.plot(t, reference_signal_dbfs_median, label="Original Signal", alpha=0.5)
-    plt.plot(t, noisy_signal_dbfs_median, label="Noisy Signal", alpha=0.5)
-    plt.plot(t, filtered_signal_dbfs_median, label="Filtered Signal", alpha=0.5)
-    plt.plot(t, error_signal_dbfs_median, label="Error Signal", alpha=0.5)
-    plt.legend()
-    plt.xlabel("Time (s)")
-    plt.ylabel("Amplitude (dBFS) - median")
-    plt.grid()
-
-    plt.tight_layout()
-    plt.show()

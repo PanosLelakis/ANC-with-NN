@@ -1,11 +1,12 @@
 import numpy as np
 
 class NLMS:
-    def __init__(self, L, mu):
+    def __init__(self, L, mu, eps=1e-8):
         self.L = L
         self.mu = mu
         self.w = np.zeros(self.L)  # Filter weights
         self.u = np.zeros(self.L)  # Input buffer
+        self.eps = eps
 
     def predict(self, x):
         """ Predict the filter output """
@@ -15,7 +16,7 @@ class NLMS:
 
     def adapt(self, error):
         """ NLMS weight adaptation """
-        norm_factor = np.dot(self.u, self.u) + 1e-8
+        norm_factor = np.dot(self.u, self.u) + self.eps
         self.w += 2 * self.mu * error * self.u / norm_factor
 
     def estimate(self, x, d):

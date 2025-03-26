@@ -3,7 +3,8 @@ from tkinter import ttk
 import threading
 import time
 from utils.audio_utils import play_audio
-from main import run_anc, plot_results
+from main import run_anc
+from utils.plot import plot_results
 
 # Create the root window first
 root = tk.Tk()
