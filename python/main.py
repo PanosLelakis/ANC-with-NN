@@ -81,7 +81,7 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
 
     # Compute performance metrics
     convergence_time = compute_convergence_time(error_signal, fs)
-    steady_state_error = compute_steady_state_error(error_signal, fs)
+    steady_state_error = compute_steady_state_error(error_signal)
 
     # Send results to GUI callback
-    completion_callback(reference_signal, noisy_signal, filtered_signal, error_signal, t, total_execution_time, convergence_time, steady_state_error)
+    completion_callback(reference_signal, noisy_signal, filtered_signal, error_signal, t, fs, total_execution_time, convergence_time, steady_state_error)

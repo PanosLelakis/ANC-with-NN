@@ -7,7 +7,8 @@ def compute_convergence_time(error_signal, fs, threshold_factor=0.1, min_stable_
     Parameters:
     - error_signal (numpy array): The error signal produced by the algorithm.
     - fs (int): Sampling frequency in Hz.
-    - threshold_factor (float): Percentage of max error used as threshold (default 10%).
+    - threshold_factor (float): Percentage of max error used as threshold (default 10   
+    %).
     - min_stable_duration (float): Minimum time (seconds) the error must stay below threshold.
     
     Returns:

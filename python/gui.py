@@ -64,9 +64,9 @@ def update_progress(progress):
     minutes, seconds = divmod(int(estimated_time), 60)
     root.after(0, lambda: time_label.config(text=f"Time remaining: {minutes:02}:{seconds:02}"))
 
-def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signal, t, exec_time, conv_time, steady_error):
+def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signal, t, fs, exec_time, conv_time, steady_error):
     # Callback when ANC finishes
-    global noisy_audio, filtered_audio, total_time, convergence_speed, steady_state_error, stored_t
+    global noisy_audio, filtered_audio, total_time, convergence_speed, steady_state_error, stored_t, stored_fs
     global stored_reference_signal, stored_error_signal
 
     noisy_audio = noisy_signal
@@ -74,6 +74,7 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     stored_reference_signal = reference_signal
     stored_error_signal = error_signal
     stored_t = t
+    stored_fs = fs
 
     total_time = exec_time
     convergence_speed = conv_time
@@ -90,8 +91,8 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     root.after(0, lambda: error_label.config(text=f"Steady-State Error: {steady_state_error:.2f} dB"))
 
 def open_graphs():
-    global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t
-    root.after(0, lambda: plot_results(stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t))
+    global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs
+    root.after(0, lambda: plot_results(stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs))
 
 def play_noisy_signal():
     global is_playing
