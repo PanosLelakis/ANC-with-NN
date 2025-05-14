@@ -13,13 +13,13 @@ class FxLMS:
         self.u[0] = x
         return np.dot(self.w, self.u)
 
-    def adapt(self, error, filtered_x):
-        self.w = self.w - self.mu * error * filtered_x
+    def adapt(self, error, x):
+        self.w += 2 * self.mu * error * x
 
     def estimate(self, x, d):
         y = self.predict(x)
         #filtered_x = np.convolve(x, self.secondary_path_impulse_response, mode='full')[-self.L:]
-        filtered_x = x
+        #filtered_x = x
         e = d - y
-        self.adapt(e, filtered_x)
+        self.adapt(e, x)
         return e, y

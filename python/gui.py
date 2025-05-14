@@ -87,7 +87,10 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     root.after(0, lambda: graph_button.config(state=tk.NORMAL))
 
     root.after(0, lambda: total_time_label.config(text=f"Total Time: {total_time:.2f} sec"))
-    root.after(0, lambda: conv_time_label.config(text=f"Convergence Speed: {convergence_speed:.2f} sec"))
+    if convergence_speed is not None:
+        root.after(0, lambda: conv_time_label.config(text=f"Convergence Speed: {convergence_speed:.2f} sec"))
+    else:
+        root.after(0, lambda: conv_time_label.config(text="Convergence Speed: Not achieved"))
     root.after(0, lambda: error_label.config(text=f"Steady-State Error: {steady_state_error:.2f} dB"))
 
 def open_graphs():

@@ -9,18 +9,15 @@ class NLMS:
         self.eps = eps
 
     def predict(self, x):
-        """ Predict the filter output """
         self.u[1:] = self.u[:-1]
         self.u[0] = x
         return np.dot(self.w, self.u)
 
     def adapt(self, error):
-        """ NLMS weight adaptation """
         norm_factor = np.dot(self.u, self.u) + self.eps
         self.w += 2 * self.mu * error * self.u / norm_factor
 
     def estimate(self, x, d):
-        """ Estimate the filter output and adapt weights """
         y = self.predict(x)
         e = d - y
         self.adapt(e)

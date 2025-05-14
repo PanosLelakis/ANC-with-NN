@@ -1,7 +1,7 @@
 import numpy as np
 
 def generate_colored_noise(signal, snr, exponent):
-    #Generate colored noise based on the given power law exponent.
+    #Generate colored noise based on power law exponent
     #Exponents:
       # White noise (0)
       # Pink noise (-1)

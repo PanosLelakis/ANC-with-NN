@@ -15,26 +15,24 @@ class FxLMS:
         self.secondary_path_impulse_response = secondary_path_impulse_response
 
     def predict(self, x):
-        """ Predict the output of the adaptive filter. """
         self.u[1:] = self.u[:-1]  # Shift buffer
         self.u[0] = x  # Insert new input
         return np.dot(self.w, self.u)  # Predicted output
     
     def adapt(self, error, filtered_x):
-        """ Adapt the filter weights using the error and the filtered reference signal. """
         self.w = self.w - self.mu * error * filtered_x  # Update weights based on the secondary-path-filtered reference
 
     def estimate(self, x, d):
-        """ Estimate the output and calculate the error for weight adaptation. """
         y = self.predict(x)  # Get predicted output from the adaptive filter
-        filtered_x = np.convolve(x, self.secondary_path_impulse_response, mode='full')[-self.L:]  # Filter the reference signal through the secondary path
+        filtered_x = x
+        #filtered_x = np.convolve(x, self.secondary_path_impulse_response, mode='full')[-self.L:]  # Filter the reference signal through the secondary path
         e = d - y  # Compute the error signal
         self.adapt(e, filtered_x)  # Adapt filter weights
         return e, y
     
 # Load primary and secondary path
-primary_path_data = loadmat("primary_path.mat")
-secondary_path_data = loadmat("secondary_path.mat")
+primary_path_data = loadmat("python/primary_path.mat")
+secondary_path_data = loadmat("python/secondary_path.mat")
 
 # Extract the impulse responses
 primary_impulse_response = primary_path_data['sim_imp'].flatten()[:2000]  # flatten to convert to 1D array
@@ -70,9 +68,10 @@ fxlms = FxLMS(L, mu, secondary_impulse_response)
 # Filter the signal
 error_signal = np.zeros(len(noisy_signal))
 filtered_signal = np.zeros(len(noisy_signal))
-primary_output = np.convolve(noisy_signal, primary_impulse_response, mode='same')[:len(noisy_signal)]
+primary_output = np.convolve(noisy_signal, primary_impulse_response, mode='full')[:len(noisy_signal)]
+secondary_output = np.convolve(primary_output, secondary_impulse_response, mode='full')[:len(noisy_signal)]
 for n in tqdm(range(len(noisy_signal))):
-    error_signal[n], filtered_signal[n] = fxlms.estimate(noisy_signal[n], primary_output[n])
+    error_signal[n], filtered_signal[n] = fxlms.estimate(secondary_output[n], noisy_signal[n])
 
 # Performance Evaluation
 def evaluate_performance(error_signal, fs, duration):
