@@ -19,9 +19,15 @@ start_time = None
 total_time = 0  # Store total execution time
 convergence_speed = 0  # Store convergence time
 steady_state_error = 0  # Store steady-state error
+algorithm = ""
+mu = 0
+L = 0
+snr = 0
+noise_type = ""
 
 def start_algorithm():
-    global start_time
+    global start_time, algorithm, mu, L, snr, noise_type  # <== ADD this line
+
     disable_buttons()
     start_time = time.time()
 
@@ -94,8 +100,17 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     root.after(0, lambda: error_label.config(text=f"Steady-State Error: {steady_state_error:.2f} dB"))
 
 def open_graphs():
-    global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs
-    root.after(0, lambda: plot_results(stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs))
+    global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs, algorithm, mu, L, noise_type, snr
+    root.after(0, lambda: plot_results(
+        stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal,
+        stored_t, stored_fs,
+        algorithm,
+        mu,
+        L,
+        noise_type,
+        snr
+    )
+)
 
 def play_noisy_signal():
     global is_playing
