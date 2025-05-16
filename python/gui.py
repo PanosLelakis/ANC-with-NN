@@ -100,17 +100,20 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     root.after(0, lambda: error_label.config(text=f"Steady-State Error: {steady_state_error:.2f} dB"))
 
 def open_graphs():
-    global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs, algorithm, mu, L, noise_type, snr
-    root.after(0, lambda: plot_results(
+    global stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal, stored_t, stored_fs
+    global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
+
+    plot_results(
         stored_reference_signal, noisy_audio, filtered_audio, stored_error_signal,
         stored_t, stored_fs,
-        algorithm,
-        mu,
-        L,
-        noise_type,
-        snr
+        algorithm_name=algorithm,
+        mu=mu,
+        L=L,
+        noise_type=noise_type,
+        snr=snr,
+        convergence_time=convergence_speed,
+        steady_state_error=steady_state_error
     )
-)
 
 def play_noisy_signal():
     global is_playing

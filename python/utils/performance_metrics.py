@@ -1,7 +1,7 @@
 import numpy as np
 
 def compute_convergence_time(error_signal, fs, threshold_factor=0.1, min_stable_duration=0.05, acceptance_ratio=0.9):
-    threshold = threshold_factor * np.mean(np.abs(error_signal))
+    threshold = threshold_factor * np.max(np.abs(error_signal))
     samples = int(min_stable_duration * fs)
     required_below = int(acceptance_ratio * samples)
 

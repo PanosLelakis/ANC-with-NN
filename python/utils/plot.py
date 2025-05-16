@@ -6,7 +6,9 @@ from utils.fft_transform import compute_fft
 from matplotlib.ticker import ScalarFormatter
 
 def plot_results(reference_signal, noisy_signal, filtered_signal, error_signal, t, fs,
-                 algorithm_name="", mu=None, L=None, noise_type="", snr=None):
+                 algorithm_name="", mu=None, L=None, noise_type="", snr=None,
+                 convergence_time=None, steady_state_error=None):
+
     # Convert signals to dBFS
     max_val = np.max(np.abs(reference_signal))
     reference_signal_dbfs = convert_to_dbfs(reference_signal, max_val)
@@ -28,9 +30,25 @@ def plot_results(reference_signal, noisy_signal, filtered_signal, error_signal, 
     #plt.figure(figsize=(10, 6))
     plt.figure()
 
-    # Title summarizing the simulation parameters
-    title_str = f"Algorithm: {algorithm_name} | μ: {mu} | L: {L} | Noise: {noise_type} | SNR: {snr} dB"
-    plt.suptitle(title_str, fontsize=12, fontweight='bold')
+    # Create the simulation metadata title
+    title_line1 = f"Algorithm: {algorithm_name} | μ: {mu} | L: {L} | Noise: {noise_type} | SNR: {snr} dB"
+
+    # Format the convergence time
+    if convergence_time is None:
+        convergence_str = "Convergence Speed: N/A"
+    else:
+        convergence_str = f"Convergence Speed: {convergence_time:.2f} sec"
+
+    # Format steady-state error
+    if steady_state_error is None:
+        error_str = "Steady-State Error: N/A"
+    else:
+        error_str = f"Steady-State Error: {steady_state_error:.2f} dB"
+
+    title_line2 = f"{convergence_str} | {error_str}"
+
+    # Combine both lines into the suptitle
+    plt.suptitle(f"{title_line1}\n{title_line2}", fontsize=11, fontweight='bold')
 
     # Plot signals in time domain
     plt.subplot(2, 2, 1)
