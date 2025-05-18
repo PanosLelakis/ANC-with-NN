@@ -57,9 +57,9 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     elif algorithm_name == "NLMS":
         algorithm = NLMS(L, mu)
     elif algorithm_name == "FxLMS":
-        algorithm = FxLMS(L, mu, secondary_path)
+        algorithm = FxLMS(L, mu)
     elif algorithm_name == "FxNLMS":
-        algorithm = FxNLMS(L, mu, secondary_path)
+        algorithm = FxNLMS(L, mu)
     else:
         print(f"Error: Unknown algorithm '{algorithm_name}'")
         sys.exit(1)
@@ -100,7 +100,7 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
 
     max_val = np.max(np.abs(reference_signal))
     #error_signal_dbfs = convert_to_dbfs(error_signal, max_val)
-    error_signal_median = smooth_signal(error_signal, 401)
+    error_signal_median = smooth_signal(error_signal, 101)
 
     # Compute performance metrics
     #convergence_time = compute_convergence_time(error_signal, fs)
