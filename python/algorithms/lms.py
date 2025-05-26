@@ -1,10 +1,10 @@
 import numpy as np
 
 class LMS:
-    def __init__(self, L, mu):
+    def __init__(self, L, mu, w):
         self.L = L
         self.mu = mu
-        self.w = np.zeros(self.L)  # Filter weights
+        self.w = w  # Filter weights
         self.u = np.zeros(self.L)  # Input buffer
 
     def predict(self, x):

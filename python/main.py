@@ -10,7 +10,6 @@ from algorithms.fxnlms import FxNLMS
 from utils.noise import generate_white_noise, generate_pink_noise, generate_brownian_noise, generate_violet_noise, generate_grey_noise, generate_blue_noise
 from utils.performance_metrics import compute_convergence_time, compute_steady_state_error
 from utils.smoothing import smooth_signal
-from utils.convert_to_dbfs import convert_to_dbfs
 import mat73
 
 def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completion_callback):
@@ -23,8 +22,8 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     #secondary_path = loadmat("python/secondary_path.mat")['sim_imp'].flatten()[:2000]
     #primary_path = mat73.loadmat("python/primary_path_new.mat")['sim_imp'].flatten()[:4000]
     #secondary_path = loadmat("python/secondary_path_new.mat")['sim_imp'].flatten()[:2000]
-    fs, primary_path = wavfile.read("python/primary_anechoic.wav")
-    _, secondary_path = wavfile.read("python/secondary_anechoic.wav")
+    fs, primary_path = wavfile.read("python/primary_paths/primary_anechoic.wav")
+    _, secondary_path = wavfile.read("python/secondary_paths/secondary_anechoic.wav")
     
     primary_path = primary_path.astype(np.float32)
     secondary_path = secondary_path.astype(np.float32)
@@ -51,15 +50,17 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
 
     noisy_signal = noise_generators[noise_type](reference_signal, snr)
 
+    initial_weights = np.zeros(L)
+
     # Select algorithm
     if algorithm_name == "LMS":
-        algorithm = LMS(L, mu)
+        algorithm = LMS(L, mu, initial_weights)
     elif algorithm_name == "NLMS":
-        algorithm = NLMS(L, mu)
+        algorithm = NLMS(L, mu, initial_weights)
     elif algorithm_name == "FxLMS":
-        algorithm = FxLMS(L, mu)
+        algorithm = FxLMS(L, mu, initial_weights)
     elif algorithm_name == "FxNLMS":
-        algorithm = FxNLMS(L, mu)
+        algorithm = FxNLMS(L, mu, initial_weights)
     else:
         print(f"Error: Unknown algorithm '{algorithm_name}'")
         sys.exit(1)
@@ -68,11 +69,11 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     filtered_signal = np.zeros(len(noisy_signal))
     error_signal = np.zeros(len(noisy_signal))
     primary_output = np.convolve(noisy_signal, primary_path, mode='full')[:len(noisy_signal)]
+    secondary_output = None
 
     if algorithm_name == "FxLMS" or algorithm_name == "FxNLMS":
         secondary_output = np.convolve(noisy_signal, secondary_path, mode='full')[:len(noisy_signal)]
         for n in range(len(noisy_signal)):
-            #error_signal[n], filtered_signal[n] = algorithm.estimate(secondary_output[n], noisy_signal[n])
             error_signal[n], filtered_signal[n] = algorithm.estimate(secondary_output[n], primary_output[n])
 
             # Update progress
@@ -82,7 +83,6 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
         
     else:
         for n in range(len(noisy_signal)):
-            #error_signal[n], filtered_signal[n] = algorithm.estimate(secondary_output[n], noisy_signal[n])
             error_signal[n], filtered_signal[n] = algorithm.estimate(noisy_signal[n], primary_output[n])
 
             # Update progress
@@ -98,8 +98,6 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     end_time = time.time()
     total_execution_time = end_time - start_time
 
-    max_val = np.max(np.abs(reference_signal))
-    #error_signal_dbfs = convert_to_dbfs(error_signal, max_val)
     error_signal_median = smooth_signal(error_signal, 101)
 
     # Compute performance metrics
@@ -109,4 +107,9 @@ def run_anc(algorithm_name, L, mu, snr, noise_type, progress_callback, completio
     steady_state_error = compute_steady_state_error(error_signal_median)
 
     # Send results to GUI callback
-    completion_callback(reference_signal, noisy_signal, filtered_signal, error_signal, t, fs, total_execution_time, convergence_time, steady_state_error)
+    completion_callback(
+        reference_signal, noisy_signal, filtered_signal, error_signal, 
+        t, fs, total_execution_time, convergence_time, steady_state_error,
+        initial_weights, algorithm.w, primary_path, secondary_path,
+        primary_output, secondary_output
+    )

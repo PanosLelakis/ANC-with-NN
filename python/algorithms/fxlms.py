@@ -1,10 +1,10 @@
 import numpy as np
 
 class FxLMS:
-    def __init__(self, L, mu):
+    def __init__(self, L, mu, w):
         self.L = L
         self.mu = mu
-        self.w = np.zeros(self.L)
+        self.w = w
         self.u = np.zeros(self.L)
 
     def predict(self, x):

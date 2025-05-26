@@ -1,0 +1,5 @@
+sounddevice
+numpy
+scipy
+mat73
+matplotlib

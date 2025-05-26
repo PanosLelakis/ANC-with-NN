@@ -4,11 +4,11 @@ import threading
 import time
 from utils.audio_utils import play_audio
 from main import run_anc
-from utils.plot import plot_results
+from utils.plot import *
 
 # Create the root window first
 root = tk.Tk()
-root.title("Adaptive Filtering")
+root.title("ANC with NN - Panos Lelakis")
 
 # Global variables
 noisy_audio = None
@@ -16,17 +16,21 @@ filtered_audio = None
 is_playing = False
 progress_var = tk.DoubleVar(value=0.0)
 start_time = None  
-total_time = 0  # Store total execution time
-convergence_speed = 0  # Store convergence time
-steady_state_error = 0  # Store steady-state error
+total_time = 0
+convergence_speed = 0
+steady_state_error = 0
 algorithm = ""
 mu = 0
 L = 0
 snr = 0
 noise_type = ""
+stored_initial_weights = None
+stored_final_weights = None
+stored_signal_after_primary = None
+stored_signal_after_secondary = None
 
 def start_algorithm():
-    global start_time, algorithm, mu, L, snr, noise_type  # <== ADD this line
+    global start_time, algorithm, mu, L, snr, noise_type
 
     disable_buttons()
     start_time = time.time()
@@ -70,11 +74,21 @@ def update_progress(progress):
     minutes, seconds = divmod(int(estimated_time), 60)
     root.after(0, lambda: time_label.config(text=f"Time remaining: {minutes:02}:{seconds:02}"))
 
-def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signal, t, fs, exec_time, conv_time, steady_error):
-    # Callback when ANC finishes
+def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signal, 
+                   t, fs, exec_time, conv_time, steady_error, initial_weights,
+                   final_weights, primary_ir, secondary_ir,
+                   signal_after_primary, signal_after_secondary):
+    
+    # Store all the data
+    global stored_initial_weights, stored_final_weights, stored_primary_ir, stored_secondary_ir
+    global stored_signal_after_primary, stored_signal_after_secondary
     global noisy_audio, filtered_audio, total_time, convergence_speed, steady_state_error, stored_t, stored_fs
     global stored_reference_signal, stored_error_signal
-
+    
+    stored_initial_weights = initial_weights
+    stored_final_weights = final_weights
+    stored_primary_ir = primary_ir
+    stored_secondary_ir = secondary_ir
     noisy_audio = noisy_signal
     filtered_audio = filtered_signal
     stored_reference_signal = reference_signal
@@ -85,6 +99,9 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
     total_time = exec_time
     convergence_speed = conv_time
     steady_state_error = steady_error
+
+    stored_signal_after_primary = signal_after_primary
+    stored_signal_after_secondary = signal_after_secondary
 
     root.after(0, lambda: status_label.config(text="Finished", fg="green"))
     root.after(0, enable_buttons)
@@ -163,6 +180,92 @@ def play_filtered_signal():
 
     threading.Thread(target=play, daemon=True).start()
 
+def plot_filter():
+    global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
+    global stored_initial_weights, stored_final_weights
+    plot_filter_weights(
+        stored_initial_weights,
+        stored_final_weights,
+        algorithm_name=algorithm,
+        mu=mu,
+        L=L,
+        noise_type=noise_type,
+        snr=snr,
+        convergence_time=convergence_speed,
+        steady_state_error=steady_state_error
+    )
+
+def plot_primary_path_effect():
+    global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
+    global stored_t, stored_fs, stored_primary_ir, stored_signal_after_primary
+    plot_path_analysis(
+        stored_primary_ir,
+        noisy_audio,
+        stored_signal_after_primary,
+        stored_t,
+        stored_fs,
+        title_prefix="Primary",
+        algorithm_name=algorithm,
+        mu=mu,
+        L=L,
+        noise_type=noise_type,
+        snr=snr,
+        convergence_time=convergence_speed,
+        steady_state_error=steady_state_error
+    )
+
+def plot_secondary_path_effect():
+    global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
+    global stored_t, stored_fs, stored_secondary_ir, stored_signal_after_secondary
+    plot_path_analysis(
+        stored_secondary_ir,
+        noisy_audio,
+        stored_signal_after_secondary,
+        stored_t,
+        stored_fs,
+        title_prefix="Secondary",
+        algorithm_name=algorithm,
+        mu=mu,
+        L=L,
+        noise_type=noise_type,
+        snr=snr,
+        convergence_time=convergence_speed,
+        steady_state_error=steady_state_error
+    )
+
+def plot_error():
+    global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
+    global stored_error_signal, stored_t, stored_fs
+    plot_error_analysis(
+        stored_error_signal,
+        stored_t,
+        stored_fs,
+        algorithm_name=algorithm,
+        mu=mu,
+        L=L,
+        noise_type=noise_type,
+        snr=snr,
+        convergence_time=convergence_speed,
+        steady_state_error=steady_state_error
+    )
+
+def plot_signal():
+    global stored_reference_signal, noisy_audio, filtered_audio, stored_t
+    global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
+    plot_signal_flow(
+        stored_reference_signal,
+        noisy_audio,
+        filtered_audio,
+        stored_t,
+        algorithm_name=algorithm,
+        mu=mu,
+        L=L,
+        noise_type=noise_type,
+        snr=snr,
+        convergence_time=convergence_speed,
+        steady_state_error=steady_state_error
+    )
+
 # GUI Elements
 tk.Label(root, text="Select Algorithm:").grid(row=0, column=0)
 algo_var = tk.StringVar(value="LMS")
@@ -215,5 +318,15 @@ conv_time_label.grid(row=12, column=0, columnspan=2)
 
 error_label = tk.Label(root, text="Steady-State Error: --")
 error_label.grid(row=13, column=0, columnspan=2)
+
+# --- Diagnostic Graphs Frame ---
+diagnostics_frame = tk.LabelFrame(root, text="Graphs")
+diagnostics_frame.grid(row=14, column=0, columnspan=2, pady=10)
+
+tk.Button(diagnostics_frame, text="Filter Weights", command=plot_filter).grid(row=0, column=0, sticky="ew", padx=5, pady=2)
+tk.Button(diagnostics_frame, text="Primary Path", command=plot_primary_path_effect).grid(row=1, column=0, sticky="ew", padx=5, pady=2)
+tk.Button(diagnostics_frame, text="Secondary Path", command=plot_secondary_path_effect).grid(row=2, column=0, sticky="ew", padx=5, pady=2)
+tk.Button(diagnostics_frame, text="Error Analysis", command=plot_error).grid(row=3, column=0, sticky="ew", padx=5, pady=2)
+tk.Button(diagnostics_frame, text="Signal Flow", command=plot_signal).grid(row=4, column=0, sticky="ew", padx=5, pady=2)
 
 root.mainloop()
