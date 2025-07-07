@@ -12,12 +12,12 @@ class FxNLMS:
         self.u[0] = x
         return np.dot(self.w, self.u)
 
-    def adapt(self, error, filtered_x):
-        norm_factor = np.dot(filtered_x, filtered_x) + 1e-8
-        self.w += (self.mu / norm_factor) * error * filtered_x
+    def adapt(self, error):
+        norm_factor = np.dot(self.u, self.u) + 1e-8
+        self.w += (self.mu / norm_factor) * error * self.u
 
     def estimate(self, x, d):
         y = self.predict(x)
         e = d - y
-        self.adapt(e, x)
+        self.adapt(e)
         return e, y

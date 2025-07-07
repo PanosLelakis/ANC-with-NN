@@ -3,3 +3,4 @@ numpy
 scipy
 mat73
 matplotlib
+tqdm

@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
-from utils.audio_utils import play_audio
+from utils.audio_utils import play_audio, stop_audio
 from main import run_anc
 from utils.plot import *
 
@@ -134,12 +134,15 @@ def open_graphs():
 
 def play_noisy_signal():
     global is_playing
-    if is_playing:
-        return
-    is_playing = True
 
-    # Disable only the play buttons
-    play_noisy_btn.config(state=tk.DISABLED)
+    if is_playing and play_noisy_btn["text"] == "Stop playing":
+        stop_audio()
+        is_playing = False
+        reset_play_buttons()
+        return
+
+    is_playing = True
+    play_noisy_btn.config(text="Stop playing", state=tk.NORMAL)
     play_filtered_btn.config(state=tk.DISABLED)
 
     def play():
@@ -148,23 +151,22 @@ def play_noisy_signal():
         except Exception as e:
             print(f"Error playing noisy signal: {e}")
         finally:
-            # Re-enable play buttons but keep Graphs enabled
-            root.after(0, lambda: play_noisy_btn.config(state=tk.NORMAL))
-            root.after(0, lambda: play_filtered_btn.config(state=tk.NORMAL))
-            global is_playing
-            is_playing = False
+            root.after(0, reset_play_buttons)
 
     threading.Thread(target=play, daemon=True).start()
 
 def play_filtered_signal():
     global is_playing
-    if is_playing:
-        return
-    is_playing = True
 
-    # Disable only the play buttons
+    if is_playing and play_filtered_btn["text"] == "Stop playing":
+        stop_audio()
+        is_playing = False
+        reset_play_buttons()
+        return
+
+    is_playing = True
+    play_filtered_btn.config(text="Stop playing", state=tk.NORMAL)
     play_noisy_btn.config(state=tk.DISABLED)
-    play_filtered_btn.config(state=tk.DISABLED)
 
     def play():
         try:
@@ -172,13 +174,15 @@ def play_filtered_signal():
         except Exception as e:
             print(f"Error playing filtered signal: {e}")
         finally:
-            # Re-enable play buttons but keep "Graphs" enabled
-            root.after(0, lambda: play_noisy_btn.config(state=tk.NORMAL))
-            root.after(0, lambda: play_filtered_btn.config(state=tk.NORMAL))
-            global is_playing
-            is_playing = False
+            root.after(0, reset_play_buttons)
 
     threading.Thread(target=play, daemon=True).start()
+
+def reset_play_buttons():
+    global is_playing
+    is_playing = False
+    play_noisy_btn.config(state=tk.NORMAL, text="Play Noisy Signal")
+    play_filtered_btn.config(state=tk.NORMAL, text="Play Filtered Signal")
 
 def plot_filter():
     global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error

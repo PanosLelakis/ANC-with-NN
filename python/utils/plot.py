@@ -147,17 +147,23 @@ def figure_title_metadata(algorithm_name="", mu=None, L=None, noise_type="", snr
         # Combine both lines into the suptitle
         plt.suptitle(f"{title_line1}\n{title_line2}\n{title_line3}", fontsize=11, fontweight='bold')
 
-def toggle_lines(checkbox, raw_lines, smooth_lines):
-    for i in range(len(raw_lines)):
-        show_raw = checkbox.get_status()[i]
-        raw_lines[i].set_visible(show_raw)
-        smooth_lines[i].set_visible(not show_raw)
-    plt.draw()
+def add_toggle_panel(fig, raw_lines, smooth_lines):
+    # Add checkbox axes to the right of the plot (x, y, width, height)
+    toggle_ax = fig.add_axes([0.85, 0.4, 0.13, 0.2])
+    labels = [f"Line {i+1}" for i in range(len(raw_lines))]
 
-def create_toggle(raw_lines, smooth_lines):
-    ax_check = plt.add_axes([0.01, 0.5, 0.15, 0.15])
-    check = CheckButtons(ax_check, [f"Show Raw {i+1}" for i in range(len(raw_lines))], [True]*len(raw_lines))
-    check.on_clicked(lambda label: toggle_lines(check, raw_lines, smooth_lines))
+    # Initial checkbox states (True = show raw)
+    visibility = [True] * len(raw_lines)
+
+    check = CheckButtons(toggle_ax, labels, visibility)
+
+    def toggle(label):
+        index = labels.index(label)
+        raw_lines[index].set_visible(not raw_lines[index].get_visible())
+        smooth_lines[index].set_visible(not smooth_lines[index].get_visible())
+        plt.draw()
+
+    check.on_clicked(toggle)
 
 def plot_filter_weights(w_initial, w_final,
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
@@ -166,7 +172,7 @@ def plot_filter_weights(w_initial, w_final,
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
                  convergence_time, steady_state_error, "Filter Weights (Initial vs Final)")
-    
+
     plt.plot(w_initial, label="Initial")
     plt.plot(w_final, label="Final")
     plt.xlabel("Coefficient Index")
@@ -227,6 +233,7 @@ def plot_error_analysis(error_signal, t, fs,
     plt.subplot(2, 2, 1)
     raw1, = plt.plot(t, error_signal, label="Raw")
     smooth1, = plt.plot(t, error_smooth, label="Smoothed", linestyle="--")
+    #smooth1.set_visible(False)
     plt.title("Error Signal (Amplitude)")
     plt.xlim([0, 2])
     plt.legend()
@@ -235,6 +242,7 @@ def plot_error_analysis(error_signal, t, fs,
     plt.subplot(2, 2, 2)
     raw2, = plt.plot(t, error_db, label="Raw")
     smooth2, = plt.plot(t, error_db_smooth, label="Smoothed", linestyle="--")
+    #smooth2.set_visible(False)
     plt.title("Error Signal (dB)")
     plt.xlim([0, 2])
     plt.legend()
@@ -243,12 +251,15 @@ def plot_error_analysis(error_signal, t, fs,
     plt.subplot(2, 1, 2)
     plt.plot(freqs, error_fft, label="Error FFT", color="green")
     plt.title("Error Signal FFT")
-    plt.set_xscale("log")
+    plt.xscale("log")
     plt.xlim([10, 10000])
     plt.legend()
     plt.grid()
 
-    create_toggle([raw1, raw2], [smooth1, smooth2])
+    # Add toggle after plotting
+    #add_toggle_panel(plt.gcf(), [raw1, raw2], [smooth1, smooth2])
+
+    #plt.tight_layout(rect=[0, 0, 0.85, 1])  # Leave space for the toggle panel
     plt.tight_layout()
     plt.show()
 

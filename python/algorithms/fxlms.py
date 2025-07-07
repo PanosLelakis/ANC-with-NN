@@ -12,11 +12,11 @@ class FxLMS:
         self.u[0] = x
         return np.dot(self.w, self.u)
 
-    def adapt(self, error, x):
-        self.w += 2 * self.mu * error * x
+    def adapt(self, error):
+        self.w += 2 * self.mu * error * self.u
 
     def estimate(self, x, d):
         y = self.predict(x)
         e = d - y
-        self.adapt(e, x)
+        self.adapt(e)
         return e, y
