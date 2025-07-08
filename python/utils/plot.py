@@ -165,7 +165,7 @@ def add_toggle_panel(fig, raw_lines, smooth_lines):
 
     check.on_clicked(toggle)
 
-def plot_filter_weights(w_initial, w_final,
+def plot_filter_weights(w_final, #w_initial, 
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
     
@@ -173,8 +173,8 @@ def plot_filter_weights(w_initial, w_final,
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
                  convergence_time, steady_state_error, "Filter Weights (Initial vs Final)")
 
-    plt.plot(w_initial, label="Initial")
-    plt.plot(w_final, label="Final")
+    #plt.plot(w_initial, label="Initial")
+    plt.plot(w_final, label="Final weights")
     plt.xlabel("Coefficient Index")
     plt.ylabel("Value")
     plt.xlim([0, L])
@@ -200,7 +200,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
     plt.plot(t, signal_before, label="Input")
     plt.title("Signal Before Convolution")
     plt.xlim([0, 2])
-    plt.xlabel("Time (s)")
+    plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude")
     plt.legend()
     plt.grid()
@@ -209,7 +209,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
     plt.plot(t, signal_after, label="Output")
     plt.title("Signal After Convolution")
     plt.xlim([0, 2])
-    plt.xlabel("Time (s)")
+    plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude")
     plt.legend()
     plt.grid()
@@ -221,29 +221,24 @@ def plot_error_analysis(error_signal, t, fs,
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
     
-    error_smooth = smooth_signal(error_signal, 401)
-    error_db = 20 * np.log10(np.abs(error_signal + 1e-10))
-    error_db_smooth = smooth_signal(error_db, 401)
+    #error_smooth = smooth_signal(error_signal, 401)
+    #error_db = 20 * np.log10(np.abs(error_signal + 1e-10))
+    #error_db_smooth = smooth_signal(error_db, 401)
     freqs, error_fft = compute_fft(error_signal, fs)
+    error_dbfs = convert_to_dbfs(error_signal, np.max(abs(error_signal)))
+    error_dbfs_smooth = smooth_signal(error_dbfs, 401)
 
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
                  convergence_time, steady_state_error, "Error Signal Analysis")
 
-    plt.subplot(2, 2, 1)
-    raw1, = plt.plot(t, error_signal, label="Raw")
-    smooth1, = plt.plot(t, error_smooth, label="Smoothed", linestyle="--")
-    #smooth1.set_visible(False)
-    plt.title("Error Signal (Amplitude)")
-    plt.xlim([0, 2])
-    plt.legend()
-    plt.grid()
-
-    plt.subplot(2, 2, 2)
-    raw2, = plt.plot(t, error_db, label="Raw")
-    smooth2, = plt.plot(t, error_db_smooth, label="Smoothed", linestyle="--")
+    plt.subplot(2, 1, 1)
+    raw = plt.plot(t, error_dbfs, label="Raw")
+    smooth = plt.plot(t, error_dbfs_smooth, label="Smoothed", linestyle="--")
     #smooth2.set_visible(False)
-    plt.title("Error Signal (dB)")
+    plt.title("Error Signal")
+    plt.xlabel("Time (sec)")
+    plt.ylabel("Amplitude (dBFS)")
     plt.xlim([0, 2])
     plt.legend()
     plt.grid()
@@ -252,7 +247,10 @@ def plot_error_analysis(error_signal, t, fs,
     plt.plot(freqs, error_fft, label="Error FFT", color="green")
     plt.title("Error Signal FFT")
     plt.xscale("log")
+    plt.xlabel("Frequency (Hz) - log")
+    plt.ylabel("Magnitude")
     plt.xlim([10, 10000])
+    plt.ylim([60, 120])
     plt.legend()
     plt.grid()
 
@@ -275,6 +273,8 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.plot(t, reference, label="Reference", alpha=0.7)
     plt.plot(t, noisy, label="Noisy", alpha=0.7)
     plt.title("Reference vs Noisy")
+    plt.xlabel("Time (sec)")
+    plt.ylabel("Amplitude")
     plt.xlim([0, 2])
     plt.legend()
     plt.grid()
@@ -283,6 +283,8 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.plot(t, noisy, label="Noisy", alpha=0.7)
     plt.plot(t, filtered, label="Filtered", alpha=0.7)
     plt.title("Noisy vs Filtered")
+    plt.xlabel("Time (sec)")
+    plt.ylabel("Amplitude")
     plt.xlim([0, 2])
     plt.legend()
     plt.grid()

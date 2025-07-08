@@ -188,8 +188,8 @@ def plot_filter():
     global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
     global stored_initial_weights, stored_final_weights
     plot_filter_weights(
-        stored_initial_weights,
         stored_final_weights,
+        #stored_initial_weights,
         algorithm_name=algorithm,
         mu=mu,
         L=L,
