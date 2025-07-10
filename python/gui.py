@@ -111,7 +111,7 @@ def on_anc_complete(reference_signal, noisy_signal, filtered_signal, error_signa
 
     root.after(0, lambda: total_time_label.config(text=f"Total Time: {total_time:.2f} sec"))
     if convergence_speed is not None:
-        root.after(0, lambda: conv_time_label.config(text=f"Convergence Speed: {convergence_speed:.2f} sec"))
+        root.after(0, lambda: conv_time_label.config(text=f"Convergence Speed: {convergence_speed:.2f} ms"))
     else:
         root.after(0, lambda: conv_time_label.config(text="Convergence Speed: Not achieved"))
     root.after(0, lambda: error_label.config(text=f"Steady-State Error: {steady_state_error:.2f} dB"))
@@ -186,9 +186,10 @@ def reset_play_buttons():
 
 def plot_filter():
     global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
-    global stored_initial_weights, stored_final_weights
+    global stored_initial_weights, stored_final_weights, stored_fs
     plot_filter_weights(
-        stored_final_weights,
+        fs=stored_fs,
+        w_final=stored_final_weights,
         #stored_initial_weights,
         algorithm_name=algorithm,
         mu=mu,
@@ -239,11 +240,12 @@ def plot_secondary_path_effect():
 
 def plot_error():
     global algorithm, mu, L, noise_type, snr, convergence_speed, steady_state_error
-    global stored_error_signal, stored_t, stored_fs
+    global stored_error_signal, stored_signal_after_primary, stored_t, stored_fs
     plot_error_analysis(
         stored_error_signal,
         stored_t,
         stored_fs,
+        passive_cancelling=stored_signal_after_primary,
         algorithm_name=algorithm,
         mu=mu,
         L=L,

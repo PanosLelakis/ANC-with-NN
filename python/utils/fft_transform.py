@@ -1,6 +1,6 @@
 import numpy as np
 
-def compute_fft(signal, fs):
+def compute_fft(signal, fs, n_fft=None):
     """
     Computes the FFT of a signal and returns the frequency spectrum in dBFS.
 

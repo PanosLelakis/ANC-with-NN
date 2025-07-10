@@ -132,7 +132,7 @@ def figure_title_metadata(algorithm_name="", mu=None, L=None, noise_type="", snr
     if convergence_time is None:
         convergence_str = "Convergence Speed: N/A"
     else:
-        convergence_str = f"Convergence Speed: {convergence_time:.2f} sec"
+        convergence_str = f"Convergence Speed: {convergence_time:.2f} ms"
 
     # Format steady-state error
     if steady_state_error is None:
@@ -165,92 +165,129 @@ def add_toggle_panel(fig, raw_lines, smooth_lines):
 
     check.on_clicked(toggle)
 
-def plot_filter_weights(w_final, #w_initial, 
+def plot_filter_weights(fs, w_final, #w_initial, 
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
+    
+    freqs, w_fft = compute_fft(w_final, fs)
     
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
                  convergence_time, steady_state_error, "Filter Weights (Initial vs Final)")
 
+    plt.subplot(2, 1, 1)
     #plt.plot(w_initial, label="Initial")
-    plt.plot(w_final, label="Final weights")
+    plt.plot(w_final, label="Final Weights")
+    plt.title("Filter Weights (Time Domain)")
     plt.xlabel("Coefficient Index")
-    plt.ylabel("Value")
+    plt.ylabel("Weight Value")
     plt.xlim([0, L])
     plt.grid()
     plt.legend()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(freqs, w_fft, label="FFT of Weights")
+    plt.title("Filter Weights (Frequency Domain)")
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Magnitude")
+    plt.xscale("log")
+    plt.xlim([10, 10000])
+    plt.grid()
+    plt.legend()
+
+    plt.tight_layout()
     plt.show()
 
 def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix,
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
 
+    freqs_path, path_fft = compute_fft(path_ir, fs)
+    freqs_before, before_fft = compute_fft(signal_before, fs)
+    freqs_after, after_fft = compute_fft(signal_after, fs)
+
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
-                 convergence_time, steady_state_error, f"{title_prefix} Path Effect")
+                          convergence_time, steady_state_error,
+                          f"{title_prefix} Path Frequency Domain")
 
-    plt.subplot(2, 2, 1)
-    plt.plot(path_ir, label="Impulse Response")
-    plt.title("Impulse Response")
-    plt.legend()
+    plt.subplot(2, 1, 1)
+    plt.plot(freqs_path, path_fft, label="Impulse Response FFT")
+    plt.title(f"{title_prefix} Path Frequency Response")
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Magnitude")
+    plt.xscale("log")
+    plt.xlim([10, 10000])
     plt.grid()
-
-    plt.subplot(2, 2, 2)
-    plt.plot(t, signal_before, label="Input")
-    plt.title("Signal Before Convolution")
-    plt.xlim([0, 2])
-    plt.xlabel("Time (sec)")
-    plt.ylabel("Amplitude")
     plt.legend()
-    plt.grid()
 
     plt.subplot(2, 1, 2)
-    plt.plot(t, signal_after, label="Output")
-    plt.title("Signal After Convolution")
-    plt.xlim([0, 2])
-    plt.xlabel("Time (sec)")
-    plt.ylabel("Amplitude")
-    plt.legend()
+    plt.plot(freqs_before, before_fft, label="Input Signal", alpha=0.7)
+    plt.plot(freqs_after, after_fft, label="After Convolution", alpha=0.7)
+    plt.title(f"Signal Before & After {title_prefix} Path (FFT)")
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Magnitude")
+    plt.xscale("log")
+    plt.xlim([10, 10000])
     plt.grid()
+    plt.legend()
 
     plt.tight_layout()
     plt.show()
 
-def plot_error_analysis(error_signal, t, fs,
+def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
     
     #error_smooth = smooth_signal(error_signal, 401)
     #error_db = 20 * np.log10(np.abs(error_signal + 1e-10))
     #error_db_smooth = smooth_signal(error_db, 401)
-    freqs, error_fft = compute_fft(error_signal, fs)
-    error_dbfs = convert_to_dbfs(error_signal, np.max(abs(error_signal)))
+
+    # Use last 20% of samples
+    start_idx = int(0.8 * len(error_signal))
+    active_segment = error_signal[start_idx:]
+    freqs, error_fft = compute_fft(active_segment, fs)
+
+    max_value = np.max(abs(error_signal))
+    error_dbfs = convert_to_dbfs(error_signal, max_value)
     error_dbfs_smooth = smooth_signal(error_dbfs, 401)
+
+    if passive_cancelling is not None:
+        passive_dbfs = convert_to_dbfs(passive_cancelling, max_value)
+        passive_dbfs_smooth = smooth_signal(passive_dbfs, 401)
+        passive_segment = passive_cancelling[start_idx:]
+        _, passive_fft = compute_fft(passive_segment, fs)
 
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
                  convergence_time, steady_state_error, "Error Signal Analysis")
 
     plt.subplot(2, 1, 1)
-    raw = plt.plot(t, error_dbfs, label="Raw")
-    smooth = plt.plot(t, error_dbfs_smooth, label="Smoothed", linestyle="--")
-    #smooth2.set_visible(False)
-    plt.title("Error Signal")
+    if passive_cancelling is not None:
+        plt.plot(t, passive_dbfs_smooth, label="Passive Cancelling", linestyle="--", alpha=0.7)
+        plt.plot(t, error_dbfs_smooth, label="Active Cancelling", linestyle="-", alpha=0.7)
+    else:
+        plt.plot(t, error_dbfs_smooth, label="Active Cancelling", linestyle="-")
+    plt.title("Active - Passive Cancelling (Time Domain)")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude (dBFS)")
-    plt.xlim([0, 2])
+    plt.xlim([0, 1])
     plt.legend()
     plt.grid()
 
     plt.subplot(2, 1, 2)
-    plt.plot(freqs, error_fft, label="Error FFT", color="green")
-    plt.title("Error Signal FFT")
+    if passive_cancelling is not None:
+        plt.plot(freqs, passive_fft, label="Passive Cancelling FFT", alpha=0.7)
+        plt.plot(freqs, error_fft, label="Active Cancelling FFT", alpha=0.7)
+    else:
+        plt.plot(freqs, error_fft, label="Active Cancelling FFT")
+    plt.title("Active - Passive Cancelling (Frequency Domain)")
     plt.xscale("log")
-    plt.xlabel("Frequency (Hz) - log")
+    plt.xlabel("Frequency (Hz)")
     plt.ylabel("Magnitude")
+    plt.xscale("log")
     plt.xlim([10, 10000])
-    plt.ylim([60, 120])
+    plt.ylim([50, 130])
     plt.legend()
     plt.grid()
 
@@ -275,7 +312,7 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.title("Reference vs Noisy")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude")
-    plt.xlim([0, 2])
+    plt.xlim([0, 1])
     plt.legend()
     plt.grid()
 
@@ -285,7 +322,7 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.title("Noisy vs Filtered")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude")
-    plt.xlim([0, 2])
+    plt.xlim([0, 1])
     plt.legend()
     plt.grid()
 

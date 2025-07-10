@@ -1,6 +1,6 @@
 import numpy as np
 
-def compute_convergence_time(error_signal, fs, sse, threshold_factor=1.1, min_stable_duration=0.05, acceptance_ratio=0.9):
+def compute_convergence_time(error_signal, fs, sse, threshold_factor=1.1, min_stable_duration=0.01, acceptance_ratio=0.9):
     threshold = threshold_factor * sse
     samples = int(min_stable_duration * fs)
     required_below = int(acceptance_ratio * samples)
@@ -8,7 +8,7 @@ def compute_convergence_time(error_signal, fs, sse, threshold_factor=1.1, min_st
     for conv_idx in range(len(error_signal) - samples):
         window = np.sqrt(error_signal[conv_idx:conv_idx + samples] ** 2)
         if np.sum(window < threshold) >= required_below:
-            return conv_idx / fs
+            return 1000*(conv_idx / fs) # multiply by 1000 to convert from sec to ms
 
     return None
 
