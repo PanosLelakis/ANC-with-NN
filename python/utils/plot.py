@@ -129,7 +129,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
     plt.title("Active - Passive Cancelling (Time Domain)")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude (dBFS)")
-    plt.xlim([0, 1])
+    plt.xlim([0, 0.5])
     plt.legend()
     plt.grid()
 
@@ -147,7 +147,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
     plt.ylabel("Magnitude")
     plt.xscale("log")
     plt.xlim([10, 10000])
-    plt.ylim([50, 130])
+    plt.ylim([-20, 50])
     plt.legend()
     plt.grid()
 
@@ -173,7 +173,7 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.title("Reference vs Noisy (Time Domain)")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude")
-    plt.xlim([0, 1])
+    plt.xlim([0, 0.5])
     plt.legend()
     plt.grid()
 
@@ -183,7 +183,7 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.title("Noisy vs Filtered (Time Domain)")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude")
-    plt.xlim([0, 1])
+    plt.xlim([0, 0.5])
     plt.legend()
     plt.grid()
 
@@ -193,7 +193,7 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.title("Reference vs Noisy (Time Domain)")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude (dBFS)")
-    plt.xlim([0, 1])
+    plt.xlim([0, 0.5])
     plt.legend()
     plt.grid()
 
@@ -203,7 +203,7 @@ def plot_signal_flow(reference, noisy, filtered, t,
     plt.title("Noisy vs Filtered (Time Domain)")
     plt.xlabel("Time (sec)")
     plt.ylabel("Amplitude (dBFS)")
-    plt.xlim([0, 1])
+    plt.xlim([0, 0.5])
     plt.legend()
     plt.grid()
 

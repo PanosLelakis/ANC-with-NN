@@ -1,28 +1,29 @@
 import tkinter as tk
-from tkinter import ttk
 import threading
 import time
 import tkinter.font as tkfont
+from tkinter import ttk
+from tkinter import filedialog
 from utils.audio_utils import play_audio, stop_audio
 from main import run_anc
 from utils.plot import *
 
 # Window size parameters
-aspect_ratio = 3 / 8
-initial_width = 200
+aspect_ratio = 8/5
+initial_width = 500
 initial_height = int(initial_width / aspect_ratio)
 
 # Create the root window first
 root = tk.Tk()
 root.title("ANC with NN - Panos Lelakis")
-screen_width = root.winfo_screenwidth()
-screen_height = root.winfo_screenheight()
-window_width = int(screen_width * 0.3)  # 30% of screen width
-window_height = int(screen_height * 0.8)  # 80% of screen height
-x_pos = int((screen_width - window_width) / 2)
-y_pos = int((screen_height - window_height) / 2)
-root.geometry(f"{window_width}x{window_height}+{x_pos}+{y_pos}")
-root.minsize(initial_width, initial_height)
+#screen_width = root.winfo_screenwidth()
+#screen_height = root.winfo_screenheight()
+#window_width = int(screen_width * 0.8)  # 80% of screen width
+#window_height = int(screen_height * 0.5)  # 50% of screen height
+#x_pos = int((screen_width - window_width) / 2)
+#y_pos = int((screen_height - window_height) / 2)
+#root.geometry(f"{window_width}x{window_height}+{x_pos}+{y_pos}")
+#root.minsize(initial_width, initial_height)
 
 # Global variables
 noisy_audio = None
@@ -43,7 +44,7 @@ stored_final_weights = None
 stored_signal_after_primary = None
 stored_signal_after_secondary = None
 all_buttons = []
-resizing = False # flag to avoid recursion
+wav_file_path = tk.StringVar(value="")
 
 def start_algorithm():
     global start_time, algorithm, mu, L, snr, noise_type
@@ -72,7 +73,14 @@ def start_algorithm():
         return
 
     # Run ANC in separate thread to avoid blocking GUI
-    threading.Thread(target=run_anc, args=(algorithm, L, mu, snr, noise_type, update_progress, on_anc_complete), daemon=True).start()
+    threading.Thread(
+        target=run_anc,
+        args=(algorithm, L, mu, snr, noise_type,
+              input_type_var.get(),
+              freq_entry.get(), amp_entry.get(), wav_file_path.get(), duration_entry.get(),
+              update_progress, on_anc_complete),
+        daemon=True
+    ).start()
 
 def disable_buttons():
     global all_buttons
@@ -271,8 +279,15 @@ def plot_signal():
         steady_state_error=steady_state_error
     )
 
+def select_wav_file():
+    global wav_file_path
+    path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
+    if path:
+        wav_file_path.set(path)
+
 # Create a custom font style
-font_size = max(11, int(screen_height / 70))  # Minimum size 10, scales with screen
+#font_size = max(9, int(screen_height / 80))  # Minimum size 10, scales with screen
+font_size = 9
 default_font = tkfont.nametofont("TkDefaultFont")
 default_font.configure(size=font_size)  # Increase default font size
 root.option_add("*Font", default_font)
@@ -300,39 +315,60 @@ tk.Label(root, text="SNR (dB):", font=default_font).grid(row=4, column=0)
 snr_entry = tk.Entry(root, font=default_font)
 snr_entry.grid(row=4, column=1)
 
+# Input type selection
+tk.Label(root, text="Input Type:", font=default_font).grid(row=5, column=0)
+input_type_var = tk.StringVar(value="Sinusoid")
+tk.Radiobutton(root, text="Sinusoid", variable=input_type_var, value="Sinusoid", font=default_font).grid(row=5, column=1, sticky="w")
+tk.Radiobutton(root, text="WAV File", variable=input_type_var, value="WAV", font=default_font).grid(row=6, column=1, sticky="w")
+
+tk.Button(root, text="Select WAV File", command=select_wav_file, font=default_font).grid(row=6, column=2, columnspan=2)
+
+# Frequency and amplitude (for sinusoid)
+tk.Label(root, text="Frequency (Hz):", font=default_font).grid(row=5, column=2)
+freq_entry = tk.Entry(root)
+freq_entry.grid(row=5, column=3)
+
+tk.Label(root, text="Amplitude:", font=default_font).grid(row=5, column=4)
+amp_entry = tk.Entry(root)
+amp_entry.grid(row=5, column=5)
+
+tk.Label(root, text="Duration (sec):", font=default_font).grid(row=7, column=0)
+duration_entry = tk.Entry(root)
+duration_entry.grid(row=7, column=1)
+
 start_button = tk.Button(root, text="Start", font=default_font, command=start_algorithm)
-start_button.grid(row=5, column=0, columnspan=2)
+start_button.grid(row=8, column=0, columnspan=2)
 all_buttons.append(start_button)
 
 play_noisy_btn = tk.Button(root, text="Play Noisy Signal", state=tk.DISABLED, font=default_font, command=play_noisy_signal)
-play_noisy_btn.grid(row=6, column=0)
+play_noisy_btn.grid(row=9, column=0)
 all_buttons.append(play_noisy_btn)
 
 play_filtered_btn = tk.Button(root, text="Play Filtered Signal", state=tk.DISABLED, font=default_font, command=play_filtered_signal)
-play_filtered_btn.grid(row=6, column=1)
+play_filtered_btn.grid(row=9, column=1)
 all_buttons.append(play_filtered_btn)
 
 status_label = tk.Label(root, text="", fg="black", font=default_font)
-status_label.grid(row=7, column=0, columnspan=2)
+status_label.grid(row=10, column=0, columnspan=2)
 
 time_label = tk.Label(root, text="Time remaining: 00:00", fg="black", font=default_font)
-time_label.grid(row=8, column=0, columnspan=2)
+time_label.grid(row=11, column=0, columnspan=2)
 
-progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)
-progress_bar.grid(row=9, column=0, columnspan=2, pady=10)
+progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)#, length=window_width-10)
+progress_bar.grid(row=12, column=0, columnspan=2, pady=10)
 
 total_time_label = tk.Label(root, text="Total Time: --", font=default_font)
-total_time_label.grid(row=10, column=0, columnspan=2)
+total_time_label.grid(row=13, column=0, columnspan=2)
 
 conv_time_label = tk.Label(root, text="Convergence Speed: --", font=default_font)
-conv_time_label.grid(row=11, column=0, columnspan=2)
+conv_time_label.grid(row=14, column=0, columnspan=2)
 
 error_label = tk.Label(root, text="Steady-State Error: --", font=default_font)
-error_label.grid(row=12, column=0, columnspan=2)
+error_label.grid(row=15, column=0, columnspan=2)
 
 # --- Diagnostic Graphs Frame ---
 diagnostics_frame = tk.LabelFrame(root, text="Graphs", font=default_font)
-diagnostics_frame.grid(row=13, column=0, columnspan=2, pady=10)
+diagnostics_frame.grid(row=16, column=0, columnspan=2, pady=10)
 
 filter_weights_btn = tk.Button(diagnostics_frame, text="Filter Weights", state=tk.DISABLED, font=default_font, command=plot_filter)
 filter_weights_btn.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
@@ -354,70 +390,8 @@ signal_flow_btn = tk.Button(diagnostics_frame, text="Signal Flow", state=tk.DISA
 signal_flow_btn.grid(row=4, column=0, sticky="ew", padx=5, pady=2)
 all_buttons.append(signal_flow_btn)
 
-def on_resizee(event):
-    # Lock aspect ratio
-    desired_height = int(event.width / aspect_ratio)
-    if event.height != desired_height:
-        root.geometry(f"{event.width}x{desired_height}")
-        return  # Skip font scaling until next event
-
-    # Adjust font size based on height
-    scale = event.height / initial_height
-    new_font_size = int(10 * scale)
-
-    new_font = tkfont.Font(size=new_font_size)
-
-    # Apply font to all children
-    def apply_font_recursive(widget):
-        try:
-            widget.configure(font=new_font)
-        except:
-            pass
-        for child in widget.winfo_children():
-            apply_font_recursive(child)
-
-    apply_font_recursive(root)
-
-def on_resize(event):
-    global resizing
-    if resizing:
-        return  # prevent recursion
-
-    resizing = True
-
-    try:
-        # Lock aspect ratio
-        desired_width = event.width
-        desired_height = int(desired_width / aspect_ratio)
-
-        # Prevent infinite loop by checking if size is already close
-        if abs(event.height - desired_height) > 2:
-            root.geometry(f"{desired_width}x{desired_height}")
-
-        # Dynamic font resizing (proportional to height)
-        font_size = max(8, int(desired_height / 40))  # tune divisor as needed
-        default_font.configure(size=font_size)
-
-    finally:
-        resizing = False
-
-# Add padding to all widgets
-#for child in root.winfo_children():
-    #child.grid_configure(padx=5, pady=5)
-    
-#for child in diagnostics_frame.winfo_children():
-    #child.grid_configure(padx=5, pady=5)
-
-# Make the progress bar thicker
-progress_bar.config(length=window_width-10)  # Subtract some pixels for padding
-
-for i in range(root.grid_size()[0]):
-    root.columnconfigure(i, weight=1)
-
-for i in range(root.grid_size()[1]):
-    root.rowconfigure(i, weight=1)
-
-#root.resizable(True, True)
-#root.bind("<Configure>", on_resize)
+# Configure grid to avoid excessive spacing
+for i in range(4):  # Adjust range based on max number of columns
+    root.grid_columnconfigure(i, weight=0)  # Prevent columns from expanding
 
 root.mainloop()
