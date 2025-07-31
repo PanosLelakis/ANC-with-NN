@@ -26,7 +26,7 @@ def generate_colored_noise(signal, snr, exponent):
     noise = np.fft.irfft(noise_spectrum, n=num_samples)
 
     # Normalize noise power to 1
-    #noise /= np.sqrt(np.mean(noise ** 2))
+    noise /= np.sqrt(np.mean(noise ** 2))
 
     # Scale noise to match SNR
     scaled_noise = scale_noise(signal, noise, snr)

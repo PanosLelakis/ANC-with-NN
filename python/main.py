@@ -51,7 +51,8 @@ def run_anc(algorithm_name, L, mu, snr, noise_type,
         reference_signal = reference_signal[:int(duration * fs)]
         t = np.arange(0, len(reference_signal)) / fs
     
-    reference_signal = reference_signal / np.max(np.abs(reference_signal))
+    if amp != 0:
+        reference_signal = reference_signal / np.max(np.abs(reference_signal))
 
     # Select noise type
     noise_generators = {

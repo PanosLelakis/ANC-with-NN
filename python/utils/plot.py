@@ -33,7 +33,7 @@ def plot_filter_weights(fs, w_final, #w_initial,
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
     
-    freqs, w_fft = compute_fft(w_final, fs)
+    freqs, w_fft = compute_fft(w_final, fs, n_fft=2**14)
     
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
@@ -65,9 +65,9 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
                  algorithm_name="", mu=None, L=None, noise_type="", snr=None,
                  convergence_time=None, steady_state_error=None):
 
-    freqs_path, path_fft = compute_fft(path_ir, fs)
-    freqs_before, before_fft = compute_fft(signal_before, fs)
-    freqs_after, after_fft = compute_fft(signal_after, fs)
+    freqs_path, path_fft = compute_fft(path_ir, fs, n_fft=2**14)
+    freqs_before, before_fft = compute_fft(signal_before, fs, n_fft=2**14)
+    freqs_after, after_fft = compute_fft(signal_after, fs, n_fft=2**14)
 
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
@@ -106,7 +106,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
     # Use last 20% of samples
     start_idx = int(0.8 * len(error_signal))
     active_segment = error_signal[start_idx:]
-    freqs, error_fft = compute_fft(active_segment, fs)
+    freqs, error_fft = compute_fft(active_segment, fs, n_fft=2**14)
 
     max_value = np.max(abs(error_signal))
     error_dbfs = convert_to_dbfs(error_signal, max_value)
@@ -116,7 +116,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
         passive_dbfs = convert_to_dbfs(passive_cancelling, max_value)
         passive_dbfs_smooth = smooth_signal(passive_dbfs, 401)
         passive_segment = passive_cancelling[start_idx:]
-        _, passive_fft = compute_fft(passive_segment, fs)
+        _, passive_fft = compute_fft(passive_segment, fs, n_fft=2**14)
 
     plt.figure()
     figure_title_metadata(algorithm_name, mu, L, noise_type, snr,
@@ -147,7 +147,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
     plt.ylabel("Magnitude")
     plt.xscale("log")
     plt.xlim([10, 10000])
-    plt.ylim([-20, 50])
+    plt.ylim([-30, 60])
     plt.legend()
     plt.grid()
 

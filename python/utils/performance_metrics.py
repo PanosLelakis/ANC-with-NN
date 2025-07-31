@@ -1,6 +1,6 @@
 import numpy as np
 
-def compute_convergence_time(error_signal, fs, sse, threshold_factor=1.1, min_stable_duration=0.01, acceptance_ratio=0.9):
+def compute_convergence_time(error_signal, fs, sse, threshold_factor=1.1, min_stable_duration=0.01, acceptance_ratio=0.99):
     threshold = threshold_factor * sse
     samples = int(min_stable_duration * fs)
     required_below = int(acceptance_ratio * samples)
