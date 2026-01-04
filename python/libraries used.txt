@@ -4,3 +4,4 @@ scipy
 mat73
 matplotlib
 tqdm
+joblib

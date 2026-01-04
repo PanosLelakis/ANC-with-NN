@@ -1,0 +1,60 @@
+import os
+import csv
+import threading
+import time
+
+_LOG_PATH = None
+_LOCK = threading.Lock()
+
+def init_log(run_kind: str, clear: bool = True, log_dir: str = "."):
+    """
+    Prepare a CSV log. clear=True overwrites any previous file.
+    run_kind: "single" or "multi" (free text).
+    """
+    global _LOG_PATH
+    os.makedirs(log_dir, exist_ok=True)
+    _LOG_PATH = os.path.join(log_dir, "anc_run_log.csv")
+    if clear or (not os.path.exists(_LOG_PATH)):
+        with open(_LOG_PATH, "w", newline="") as f:
+            f.write("sep=,\n")
+            w = csv.writer(f)
+            w.writerow([
+                "ts", "run_kind", "stage", "status",
+                "algorithm", "source", "noise_label",
+                "L", "mu",
+                "conv_ms", "sse_db", "exec_time_s",
+                "in_power", "out_power",
+                "save_path", "message"
+            ])
+    # header written; subsequent rows will append
+
+def log_case(stage, status, algorithm, source, noise_label,
+             L, mu, conv_ms, sse_db, exec_time, in_power, out_power,
+             save_path, message, run_kind=None):
+    """
+    Append one line. All numeric fields may be None.
+    """
+    global _LOG_PATH
+    if _LOG_PATH is None:
+        # default to cwd file if not initialized
+        _LOG_PATH = os.path.join(".", "anc_run_log.csv")
+
+    row = [
+        time.strftime("%Y-%m-%d %H:%M:%S"),
+        (run_kind or ""), stage, status,
+        algorithm, source, noise_label,
+        ("" if L is None else int(L)),
+        ("" if mu is None else float(mu)),
+        ("" if conv_ms is None else float(conv_ms)),
+        ("" if sse_db  is None else float(sse_db)),
+        ("" if exec_time is None else float(exec_time)),
+        ("" if in_power is None else float(in_power)),
+        ("" if out_power is None else float(out_power)),
+        (save_path or ""), (message or "")
+    ]
+    try:
+        with _LOCK:
+            with open(_LOG_PATH, "a", newline="") as f:
+                csv.writer(f).writerow(row)
+    except Exception:
+        pass

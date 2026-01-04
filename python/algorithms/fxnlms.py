@@ -1,11 +1,11 @@
 import numpy as np
 
 class FxNLMS:
-    def __init__(self, L, mu, w):
+    def __init__(self, L, mu, w, dtype=np.float64):
         self.L = L
         self.mu = mu
-        self.w = w
-        self.u = np.zeros(self.L)
+        self.w = np.array(w, dtype=dtype, copy=True)
+        self.u = np.zeros(self.L, dtype=dtype)
 
     def predict(self, x):
         self.u[1:] = self.u[:-1]
