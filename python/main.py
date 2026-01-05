@@ -71,7 +71,8 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
         if len(wav) >= N:
             noise = wav[:N]
         else:
-            reps = int(np.ceil(N / len(wav))); noise = np.tile(wav, reps)[:N]
+            reps = int(np.ceil(N / len(wav)))
+            noise = np.tile(wav, reps)[:N]
         noise = noise.astype(np.float32)
         noise /= np.sqrt(np.mean(noise**2) + 1e-12)
 
@@ -121,8 +122,9 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
     # --- Form streams for the algorithm (robust PEAK normalization, independently) ---
     pmax = _robust_peak(primary_output_raw,   q=99.5)
     smax = _robust_peak(secondary_output_raw, q=99.5)
-    primary_stream   = primary_output_raw   / pmax   # d[n]
-    secondary_stream = secondary_output_raw / smax   # z[n]
+    scale_factor = max(pmax, smax)
+    primary_stream   = primary_output_raw   / scale_factor   # d[n]
+    secondary_stream = secondary_output_raw / scale_factor   # z[n]
     
     # --- Sample loop (finite guards) ---
     antinoise_signal = np.zeros(N, dtype=np.float32)
@@ -133,18 +135,25 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
     W_NORM_CAP = 1e4       # if ||w|| exceeds this, treat as divergent
 
     if algorithm_name == "LMS" or algorithm_name == "NLMS":
-        secondary_stream = noisy_signal
+        secondary_stream = noisy_signal / scale_factor
 
     for n in range(N):
+        # Algorithm estimates error and anti-noise
+        # For FxLMS/FxNLMS: x is filtered reference (S*noise), d is primary disturbance (P*noise)
+        # For LMS/NLMS: x is unfiltered noise, d is primary disturbance (P*noise)
         en, yn = algorithm.estimate(secondary_stream[n], primary_stream[n])
+        
+        # Safety: clip non-finite values
         if not np.isfinite(en): en = 0.0
         if not np.isfinite(yn): yn = 0.0
         en = float(np.clip(en, -MAX_ABS, MAX_ABS))
         yn = float(np.clip(yn, -MAX_ABS, MAX_ABS))
+        
+        # Store signal values
         error_signal[n] = en
         antinoise_signal[n] = yn
 
-        # divergence guard on weights
+        # Divergence guard on weights
         try:
             if (not np.all(np.isfinite(algorithm.w))) or (np.linalg.norm(algorithm.w) > W_NORM_CAP):
                 # zero-out the rest and stop early
@@ -157,10 +166,6 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
         # Update progress
         if (n % progress_step) == 0:
             progress_callback(int((n / N) * 100))
-
-    # Save signals for playback
-    #np.save("noisy_signal.npy", noisy_signal)
-    #np.save("antinoise_signal.npy", antinoise_signal)
 
     # Compute total execution time
     end_time = time.time()
@@ -176,7 +181,7 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
     error_signal = np.nan_to_num(error_signal, nan=0.0, posinf=0.0, neginf=0.0)
     antinoise_signal = np.nan_to_num(antinoise_signal, nan=0.0, posinf=0.0, neginf=0.0)
 
-    after_signal_raw  = np.clip(pmax * error_signal, -1e3, 1e3)
+    after_signal_raw  = np.clip(scale_factor * error_signal, -1e3, 1e3)
     before_signal_raw = primary_output_raw
 
     # Compute noise power

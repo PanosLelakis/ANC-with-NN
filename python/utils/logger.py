@@ -44,12 +44,12 @@ def log_case(stage, status, algorithm, source, noise_label,
         (run_kind or ""), stage, status,
         algorithm, source, noise_label,
         ("" if L is None else int(L)),
-        ("" if mu is None else float(mu)),
-        ("" if conv_ms is None else float(conv_ms)),
-        ("" if sse_db  is None else float(sse_db)),
-        ("" if exec_time is None else float(exec_time)),
-        ("" if in_power is None else float(in_power)),
-        ("" if out_power is None else float(out_power)),
+        ("" if mu is None else f"{float(mu):.4f}"),
+        ("" if conv_ms is None else f"{float(conv_ms):.2f}"),
+        ("" if sse_db  is None else f"{float(sse_db):.2f}"),
+        ("" if exec_time is None else f"{float(exec_time):.2f}"),
+        ("" if in_power is None else f"{float(in_power):.3f}"),
+        ("" if out_power is None else f"{float(out_power):.3f}"),
         (save_path or ""), (message or "")
     ]
     try:

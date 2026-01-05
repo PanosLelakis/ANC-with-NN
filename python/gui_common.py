@@ -23,7 +23,7 @@ class SharedState:
     progress_bar = None
     status_label = None
 
-    # Buttons (for enable/disable as a group)
+    # Buttons list (for mass enabling/disabling)
     all_buttons = None
 
     # Stored signals/state set by single-run completion
@@ -74,14 +74,15 @@ class SharedState:
     last_L_vals  = None
 
 def build_and_run():
+    # Build main program window
     root = tk.Tk()
     root.title("ANC with NN — Single & Multi Run")
 
     paned = ttk.PanedWindow(root, orient="horizontal")
     paned.pack(fill="both", expand=True)
 
-    left_frame  = tk.Frame(paned)
-    right_frame = tk.Frame(paned)
+    left_frame  = tk.Frame(paned) # Single run gui
+    right_frame = tk.Frame(paned) # Multi run gui
     paned.add(left_frame,  weight=1)
     paned.add(right_frame, weight=1)
 
@@ -96,6 +97,7 @@ def build_and_run():
     state.wav_file_path = tk.StringVar(value="")
     state.all_buttons = []
 
+    # Add single (left) and multi (right) run guis to main window
     gui_single.build_single_ui(left_frame, state, default_font, header_font)
     gui_multi.build_multi_ui(right_frame, state, default_font, header_font)
 
@@ -105,5 +107,6 @@ def build_and_run():
 
     root.mainloop()
 
+# Typical __name__ type of shit
 if __name__ == "__main__":
-    build_and_run()
+    build_and_run() # Build that shit and kick it alive

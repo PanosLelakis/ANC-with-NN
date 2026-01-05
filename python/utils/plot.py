@@ -126,7 +126,7 @@ def plot_filter_weights(fs, w_final, #w_initial,
                   "Weight Value", 0, L-1, -1, 1, xscale=None)
     if save_dir:
         save_plot(fig1, save_dir, "filter_weights_time.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
 
     fig2, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
     figure_title_metadata(fig2, algorithm_name, mu, L, noise_type,
@@ -136,7 +136,7 @@ def plot_filter_weights(fs, w_final, #w_initial,
                   "Magnitude (dB)", 10, 10000, -20, 10, xscale="log")
     if save_dir:
         save_plot(fig2, save_dir, "filter_weights_fft.png")
-    dispose_fig(fig2, plt)
+    dispose_fig(fig2, plt, save_dir)
 
 def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix,
                  algorithm_name="", mu=None, L=None, noise_type="",
@@ -158,7 +158,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
                   "Magnitude (dB)", 10, 10000, -10, 20, xscale="log")
     if save_dir:
         save_plot(fig1, save_dir, f"{title_prefix.lower()}_path_fft.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
 
     # Second figure: input vs after path (FFT)
     fig2, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
@@ -170,7 +170,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
                   "Magnitude (dB)", 10, 10000, 20, 80, xscale="log")
     if save_dir:
         save_plot(fig2, save_dir, f"{title_prefix.lower()}_before_after_fft.png")
-    dispose_fig(fig2, plt)
+    dispose_fig(fig2, plt, save_dir)
 
 def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
                  algorithm_name="", mu=None, L=None, noise_type="",
@@ -211,7 +211,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
 
     if save_dir:
         save_plot(fig1, save_dir, "error_time.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
 
     fig2, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
     figure_title_metadata(fig2, algorithm_name, mu, L, noise_type,
@@ -228,7 +228,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
     
     if save_dir:
         save_plot(fig2, save_dir, "error_fft.png")
-    dispose_fig(fig2, plt)
+    dispose_fig(fig2, plt, save_dir)
 
 def plot_signal_flow(reference, noisy, error, t,
                  algorithm_name="", mu=None, L=None, noise_type="",
@@ -264,7 +264,7 @@ def plot_signal_flow(reference, noisy, error, t,
 
     if save_dir:
         save_plot(fig1, save_dir, "signal_flow.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
 
 def plot_noise_spectrogram(signal, fs, nperseg=1024, noverlap=512, save_dir=None):
     f, t, Sxx = spectrogram(signal, fs=fs, nperseg=nperseg, noverlap=noverlap,
@@ -278,7 +278,7 @@ def plot_noise_spectrogram(signal, fs, nperseg=1024, noverlap=512, save_dir=None
     cbar.set_label('Magnitude (dB)')
     if save_dir:
         save_plot(fig1, save_dir, "noise_spectrogram.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
 
 def _band_edges_from_string(bands_str):
     # Example: "0-500, 500-1000, 1000-3000"
@@ -338,7 +338,7 @@ def plot_band_attenuation(d_signal, e_signal, fs, bands=None, bands_str="", save
     ax.grid(axis='y', alpha=0.3)
     if save_dir:
         save_plot(fig1, save_dir, "band_attenuation.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
 
 def plot_hparam_heatmap(ranked, mu_vals, L_vals, save_dir=None):
     score = np.full((len(L_vals), len(mu_vals)), np.nan, dtype=float)
@@ -363,4 +363,4 @@ def plot_hparam_heatmap(ranked, mu_vals, L_vals, save_dir=None):
     ax.set_xticklabels([f"{m:.3g}" for m in mu_vals], rotation=45)
     if save_dir:
         save_plot(fig1, save_dir, "param_heatmap.png")
-    dispose_fig(fig1, plt)
+    dispose_fig(fig1, plt, save_dir)
