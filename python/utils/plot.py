@@ -46,13 +46,22 @@ def figure_title_metadata(fig,
                           algorithm_name="", mu=None, L=None, noise_type="",
                           convergence_time=None, steady_state_error=None,
                           title_line3="", fontsize=9.5, y=0.98):
-    """Write a 1-3 line suptitle on the provided Figure without touching pyplot/backend."""
-    title_line1 = f"Algo: {algorithm_name} | μ: {mu} | L: {L} | Noise: {noise_type}"
 
-    if convergence_time is None:  conv_str = "Conv. Speed: N/A"
-    else:                         conv_str = f"Conv. Speed: {convergence_time:.2f} ms"
-    if steady_state_error is None: sse_str = "SSE: N/A"
-    else:                          sse_str = f"SSE: {steady_state_error:.2f} dB"
+    # --- consistent formatting (same style as GUI/CSV) ---
+    mu_str = "N/A" if mu is None else f"{float(mu):.6g}"
+    L_str  = "N/A" if L is None else f"{int(L)}"
+
+    title_line1 = f"Algo: {algorithm_name} | μ: {mu_str} | L: {L_str} | Noise: {noise_type}"
+
+    if convergence_time is None:
+        conv_str = "Conv. Speed: N/A"
+    else:
+        conv_str = f"Conv. Speed: {float(convergence_time):.2f} ms"
+
+    if steady_state_error is None:
+        sse_str = "SSE: N/A"
+    else:
+        sse_str = f"SSE: {float(steady_state_error):.2f} dB"
 
     title_line2 = f"{conv_str} | {sse_str}"
     if title_line3:
@@ -89,7 +98,11 @@ def beautify_plot(axis, title, xlabel, ylabel, xlim_left, xlim_right, ylim_botto
         axis.set_xlim(xlim_left, xlim_right)
     if (ylim_bottom is not None) and (ylim_top is not None):
         axis.set_ylim(ylim_bottom, ylim_top)
-    axis.legend(loc="upper right")
+    _, labels = axis.get_legend_handles_labels()
+    # ignore empty labels
+    labels_ok = [lb for lb in labels if lb and not str(lb).startswith("_")]
+    if len(labels_ok) > 0:
+        axis.legend(loc="upper right")
     axis.grid()
     axis.get_figure().tight_layout(rect=[0, 0.06, 1, 0.90])
 
@@ -101,14 +114,31 @@ def save_plot(fig, save_dir, name):
 
 def dispose_fig(fig, plt, save_dir):
     try:
+        # SAVING (headless or interactive): close/clear immediately
         if save_dir is not None:
             if plt is not None:
                 plt.close(fig)
             else:
                 fig.clear()
-        else:
-            import gc
-            fig.canvas.mpl_connect("close_event", lambda evt: (evt.canvas.figure.clear(), gc.collect()))
+            return
+
+        # INTERACTIVE (save_dir is None):
+        # show the window, then attach cleanup when user closes it
+        if plt is not None:
+            try:
+                plt.show(block=False)
+            except Exception:
+                pass
+
+        import gc
+        try:
+            fig.canvas.mpl_connect(
+                "close_event",
+                lambda evt: (evt.canvas.figure.clear(), gc.collect())
+            )
+        except Exception:
+            pass
+
     except Exception:
         pass
 
@@ -117,15 +147,15 @@ def plot_filter_weights(fs, w_final, #w_initial,
                 convergence_time=None, steady_state_error=None,
                 save_dir=None):
     
-    freqs, w_fft = compute_fft(w_final, fs, n_fft=2**14)
+    freqs, w_fft = compute_fft(w_final, fs)
     fig1, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
     figure_title_metadata(fig1, algorithm_name, mu, L, noise_type,
                       convergence_time, steady_state_error, "Filter Weights")
     fig1.gca().plot(w_final, label="Final Weights", antialiased=True)
-    beautify_plot(fig1.gca(), "Filter Weights (Time Domain)", "Coefficient Index",
+    beautify_plot(fig1.gca(), "Filter Weights Values", "Coefficient Index",
                   "Weight Value", 0, L-1, -1, 1, xscale=None)
     if save_dir:
-        save_plot(fig1, save_dir, "filter_weights_time.png")
+        save_plot(fig1, save_dir, "filter_weights_values.png")
     dispose_fig(fig1, plt, save_dir)
 
     fig2, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
@@ -133,7 +163,7 @@ def plot_filter_weights(fs, w_final, #w_initial,
                       convergence_time, steady_state_error, "Filter Weights")
     fig2.gca().plot(freqs, w_fft, label="FFT of Weights", antialiased=True)
     beautify_plot(fig2.gca(), "Filter Weights (Frequency Domain)", "Frequency (Hz)",
-                  "Magnitude (dB)", 10, 10000, -20, 10, xscale="log")
+                  "Magnitude (dB)", 1e-1, 1e4, -20, 10, xscale="log")
     if save_dir:
         save_plot(fig2, save_dir, "filter_weights_fft.png")
     dispose_fig(fig2, plt, save_dir)
@@ -142,9 +172,15 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
                  algorithm_name="", mu=None, L=None, noise_type="",
                  convergence_time=None, steady_state_error=None, save_dir=None):
 
-    freqs_path, path_fft = compute_fft(path_ir, fs, n_fft=2**14)
-    freqs_before, before_fft = compute_fft(signal_before, fs, n_fft=2**14)
-    freqs_after, after_fft = compute_fft(signal_after, fs, n_fft=2**14)
+    freqs_path, path_fft = compute_fft(path_ir, fs)
+    freqs_before, before_fft = compute_fft(signal_before, fs)
+    freqs_after, after_fft = compute_fft(signal_after, fs)
+
+    #scale = np.max(np.abs(path_fft)) + 1e-12
+
+    #path_fft /= scale
+    #before_fft /= scale
+    #after_fft /= scale
 
     path_fft_s = smooth_fractional_octave(freqs_path,  path_fft,  fraction=6, scale=8.0, min_bins=11,  max_bins=199)
     before_s = smooth_fractional_octave(freqs_before, before_fft, fraction=6, scale=8.0, min_bins=11,  max_bins=199)
@@ -155,7 +191,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
                       convergence_time, steady_state_error, f"{title_prefix} Path Frequency Domain")
     fig1.gca().plot(freqs_path, path_fft_s, label="Frequency Response (smoothed)", antialiased=True)
     beautify_plot(fig1.gca(), f"{title_prefix} Path Frequency Response", "Frequency (Hz)",
-                  "Magnitude (dB)", 10, 10000, -10, 20, xscale="log")
+                  "Magnitude (dB)", 1e-1, 1e4, -10, 20, xscale="log")
     if save_dir:
         save_plot(fig1, save_dir, f"{title_prefix.lower()}_path_fft.png")
     dispose_fig(fig1, plt, save_dir)
@@ -167,7 +203,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, t, fs, title_prefix
     fig2.gca().plot(freqs_before, before_s,   label="Input (smoothed)", antialiased=True)
     fig2.gca().plot(freqs_after,  after_s,    label="After (smoothed)", antialiased=True)
     beautify_plot(fig2.gca(), f"Signal Before & After {title_prefix} Path (FFT)", "Frequency (Hz)",
-                  "Magnitude (dB)", 10, 10000, 20, 80, xscale="log")
+                  "Magnitude (dB)", 1e-1, 1e4, 20, 60, xscale="log")
     if save_dir:
         save_plot(fig2, save_dir, f"{title_prefix.lower()}_before_after_fft.png")
     dispose_fig(fig2, plt, save_dir)
@@ -179,21 +215,25 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
     # Use last 20% of samples
     start_idx = int(0.8 * len(error_signal))
     active_segment = error_signal[start_idx:]
-    freqs, error_fft = compute_fft(active_segment, fs, n_fft=2**14)
+    freqs, error_fft = compute_fft(active_segment, fs)
+
+    #scale = np.max(np.abs(error_fft)) + 1e-12
+    #error_fft /= scale
 
     if passive_cancelling is not None:
         ref_max = np.max(np.abs(passive_cancelling)) + 1e-12
         passive_dbfs = convert_to_dbfs(passive_cancelling, ref_max)
-        error_dbfs   = convert_to_dbfs(error_signal,      ref_max)
+        error_dbfs = convert_to_dbfs(error_signal, ref_max)
         passive_dbfs_smooth = smooth_time_median(passive_dbfs, fs, window_ms=120)
         passive_segment = passive_cancelling[start_idx:]
-        _, passive_fft = compute_fft(passive_segment, fs, n_fft=2**14)
+        _, passive_fft = compute_fft(passive_segment, fs)
+        #passive_fft /= scale
+        #scale = np.max(np.abs(passive_segment)) + 1e-12
         passive_fft_s = smooth_fractional_octave(freqs, passive_fft, fraction=6, scale=8.0, min_bins=11,  max_bins=199)
     else:
-        # fall back to per-signal
-        error_dbfs   = convert_to_dbfs(error_signal, np.max(np.abs(error_signal)) + 1e-12)
-    error_dbfs_smooth   = smooth_time_median(error_dbfs,   fs, window_ms=120)
-    error_fft_s   = smooth_fractional_octave(freqs, error_fft,   fraction=6, scale=8.0, min_bins=11,  max_bins=199)
+        error_dbfs = convert_to_dbfs(error_signal, np.max(np.abs(error_signal)) + 1e-12)
+    error_dbfs_smooth = smooth_time_median(error_dbfs,   fs, window_ms=120)
+    error_fft_s = smooth_fractional_octave(freqs, error_fft,   fraction=6, scale=8.0, min_bins=11,  max_bins=199)
     
     fig1, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
     figure_title_metadata(fig1, algorithm_name, mu, L, noise_type,
@@ -224,7 +264,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None,
         fig2.gca().plot(freqs, error_fft_s,  label="Active FFT (smoothed)", antialiased=True)
         title = "Active Cancelling (Frequency Domain)"
     
-    beautify_plot(fig2.gca(), title, "Frequency (Hz)", "Magnitude (dB)", 10, 10000, 20, 60, xscale="log")
+    beautify_plot(fig2.gca(), title, "Frequency (Hz)", "Magnitude (dB)", 1e-1, 1e4, 20, 60, xscale="log")
     
     if save_dir:
         save_plot(fig2, save_dir, "error_fft.png")
@@ -266,19 +306,19 @@ def plot_signal_flow(reference, noisy, error, t,
         save_plot(fig1, save_dir, "signal_flow.png")
     dispose_fig(fig1, plt, save_dir)
 
-def plot_noise_spectrogram(signal, fs, nperseg=1024, noverlap=512, save_dir=None):
-    f, t, Sxx = spectrogram(signal, fs=fs, nperseg=nperseg, noverlap=noverlap,
-                            scaling='spectrum', mode='magnitude')
-    Sxx_db = 20 * np.log10(Sxx + 1e-12)
+#def plot_noise_spectrogram(signal, fs, nperseg=1024, noverlap=512, save_dir=None):
+    #f, t, Sxx = spectrogram(signal, fs=fs, nperseg=nperseg, noverlap=noverlap,
+                            #scaling='spectrum', mode='magnitude')
+    #Sxx_db = 20 * np.log10(Sxx + 1e-12)
 
-    fig1, plt = _new_fig(headless=bool(save_dir))
-    beautify_plot(fig1.gca(), "Noise Spectrogram", "Time (sec)", "Frequency (Hz)", None, None, 10, 10000, yscale="log")
-    im = fig1.gca().pcolormesh(t, f, Sxx_db, shading='gouraud')
-    cbar = fig1.colorbar(im)
-    cbar.set_label('Magnitude (dB)')
-    if save_dir:
-        save_plot(fig1, save_dir, "noise_spectrogram.png")
-    dispose_fig(fig1, plt, save_dir)
+    #fig1, plt = _new_fig(headless=bool(save_dir))
+    #beautify_plot(fig1.gca(), "Noise Spectrogram", "Time (sec)", "Frequency (Hz)", 0, None, 1e-1, 1e4, yscale="log")
+    #im = fig1.gca().pcolormesh(t, f, Sxx_db, shading='gouraud')
+    #cbar = fig1.colorbar(im)
+    #cbar.set_label('Magnitude (dB)')
+    #if save_dir:
+        #save_plot(fig1, save_dir, "noise_spectrogram.png")
+    #dispose_fig(fig1, plt, save_dir)
 
 def _band_edges_from_string(bands_str):
     # Example: "0-500, 500-1000, 1000-3000"
@@ -309,7 +349,9 @@ def _band_powers(x, fs):
     psd = (np.abs(X)**2) / (np.sum(win**2) + 1e-12)  # proportional; absolute scale cancels in ratios
     return freqs, psd
 
-def plot_band_attenuation(d_signal, e_signal, fs, bands=None, bands_str="", save_dir=None):
+def plot_band_attenuation(d_signal, e_signal, fs, bands=None, bands_str="", save_dir=None,
+                          algorithm_name="", mu=None, L=None, noise_type="",
+                          convergence_time=None, steady_state_error=None):
     if bands is None or len(bands) == 0:
         bands = _band_edges_from_string(bands_str)
         if len(bands) == 0:
@@ -327,6 +369,8 @@ def plot_band_attenuation(d_signal, e_signal, fs, bands=None, bands_str="", save
         labels.append(f"{int(f1)}–{int(f2)}")
 
     fig1, plt = _new_fig(headless=bool(save_dir))
+    figure_title_metadata(fig1, algorithm_name, mu, L, noise_type,
+                        convergence_time, steady_state_error, "Band Attenuation")
     ax = fig1.gca()
     x = np.arange(len(labels))
     ax.bar(x, att_db, width=0.6)
@@ -353,8 +397,11 @@ def plot_hparam_heatmap(ranked, mu_vals, L_vals, save_dir=None):
 
     fig1, plt = _new_fig(headless=bool(save_dir))
     ax = fig1.gca()
-    im = ax.imshow(score, aspect="auto", origin="lower",
-                   extent=[0, len(mu_vals)-1, 0, len(L_vals)-1])
+    #im = ax.imshow(score, aspect="auto", origin="lower",
+                   #extent=[0, len(mu_vals)-1, 0, len(L_vals)-1])
+    # cell-centered extent: always has non-zero span even for n=1
+    extent = [-0.5, len(mu_vals) - 0.5, -0.5, len(L_vals) - 0.5]
+    im = ax.imshow(score, aspect="auto", origin="lower", extent=extent)
     beautify_plot(ax, "Hyperparameter Score (lower is better)", "mu", "L", None, None, None, None)
     fig1.colorbar(im, label="score")
     ax.set_yticks(np.arange(len(L_vals)))
@@ -364,3 +411,83 @@ def plot_hparam_heatmap(ranked, mu_vals, L_vals, save_dir=None):
     if save_dir:
         save_plot(fig1, save_dir, "param_heatmap.png")
     dispose_fig(fig1, plt, save_dir)
+
+def plot_convtime_vs_mu(ranked_for_combo, save_dir=None, title_suffix=""):
+    """
+    For each μ: pick min conv_ms over all L. Plot conv_ms vs μ (log-x).
+    """
+    if not ranked_for_combo:
+        return
+
+    # group by mu -> best conv
+    best_by_mu = {}
+    for r in ranked_for_combo:
+        mu = float(r["mu"])
+        conv = float(r.get("conv_ms", np.nan))
+        if not np.isfinite(conv):
+            continue
+        if (mu not in best_by_mu) or (conv < best_by_mu[mu]):
+            best_by_mu[mu] = conv
+
+    mus = np.array(sorted(best_by_mu.keys()), dtype=float)
+    convs = np.array([best_by_mu[m] for m in mus], dtype=float)
+
+    fig, plt = _new_fig(headless=bool(save_dir), figsize=(10.5, 6.0), dpi=120)
+    ax = fig.gca()
+    ax.plot(mus, convs, marker="o", linewidth=2.0, markersize=5, label="Best over L")
+    title = "Convergence time vs μ" + (f" — {title_suffix}" if title_suffix else "")
+    beautify_plot(ax, title, "μ", "Convergence time (ms)", 1e-5, 1, 0, 1000, xscale="log")
+
+    if save_dir:
+        save_plot(fig, save_dir, "convtime_vs_mu.png")
+    dispose_fig(fig, plt, save_dir)
+
+def plot_sse_vs_L(ranked_for_combo, save_dir=None, title_suffix=""):
+    """
+    For each L: pick min sse_db over all μ. Plot sse_db vs L (linear-x).
+    """
+    if not ranked_for_combo:
+        return
+
+    best_by_L = {}
+    for r in ranked_for_combo:
+        L = int(r["L"])
+        sse = float(r.get("sse_db", np.nan))
+        if not np.isfinite(sse):
+            continue
+        if (L not in best_by_L) or (sse < best_by_L[L]):
+            best_by_L[L] = sse
+
+    Ls = np.array(sorted(best_by_L.keys()), dtype=int)
+    sses = np.array([best_by_L[L] for L in Ls], dtype=float)
+
+    fig, plt = _new_fig(headless=bool(save_dir), figsize=(10.5, 6.0), dpi=120)
+    ax = fig.gca()
+    ax.plot(Ls, sses, marker="o", linewidth=2.0, markersize=5, label="Best over μ")
+    title = "Steady-state error vs L" + (f" — {title_suffix}" if title_suffix else "")
+    beautify_plot(ax, title, "L (taps)", "SSE (dB)", 2, 1024, -40, 0)
+
+    if save_dir:
+        save_plot(fig, save_dir, "sse_vs_L.png")
+    dispose_fig(fig, plt, save_dir)
+
+def plot_spectrogram(signal, fs, title="Spectrogram", out_name="spectrogram.png",
+                     nperseg=1024, noverlap=512, save_dir=None, xlim=None):
+    f, t, Sxx = spectrogram(signal, fs=fs, nperseg=nperseg, noverlap=noverlap,
+                            scaling='spectrum', mode='magnitude')
+    Sxx_db = 20 * np.log10(Sxx + 1e-12)
+
+    fig1, plt = _new_fig(headless=bool(save_dir))
+    beautify_plot(fig1.gca(), title, "Time (sec)", "Frequency (Hz)", 0, xlim, 1e-1, 1e4, yscale="log")
+    im = fig1.gca().pcolormesh(t, f, Sxx_db, shading='gouraud')
+    cbar = fig1.colorbar(im)
+    cbar.set_label('Magnitude (dB)')
+    if save_dir:
+        save_plot(fig1, save_dir, out_name)
+    dispose_fig(fig1, plt, save_dir)
+
+def plot_noise_spectrogram(signal, fs, save_dir=None):
+    return plot_spectrogram(signal, fs, title="Noise Spectrogram", out_name="noise_spectrogram.png", save_dir=save_dir)
+
+def plot_error_spectrogram(signal, fs, save_dir=None):
+    return plot_spectrogram(signal, fs, title="Error Spectrogram", out_name="error_spectrogram.png", save_dir=save_dir, xlim=1)

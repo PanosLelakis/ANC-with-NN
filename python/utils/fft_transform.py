@@ -13,18 +13,22 @@ def compute_fft(signal, fs, n_fft=None):
 
     Returns:
     - freqs (numpy array): Frequency bins (Hz).
-    - signal_dbfs (numpy array): Magnitude spectrum in dBFS.
+    - signal_db (numpy array): Magnitude spectrum in dB.
     """
-    N = len(signal)
+    x = np.asarray(signal, dtype=float)
+    N = len(x)
+    
+    if N == 0:
+        return np.array([0.0]), np.array([0.0])
     if n_fft is None or n_fft < N:
-        n_fft = N  # Default to signal length if not specified or too small
+        n_fft = N
 
-    # Apply zero-padding if n_fft > N
-    fft_result = np.fft.fft(signal, n=n_fft)
-    fft_magnitude = np.abs(fft_result[:n_fft // 2])
-    freqs = np.fft.fftfreq(n_fft, 1/fs)[:n_fft // 2]
+    X = np.fft.rfft(x, n=n_fft)
+    mag = np.abs(X)
 
-    # Convert to dBFS (avoid log(0))
-    fft_magnitude_dbfs = 20 * np.log10(fft_magnitude + 1e-10)
+    # amplitude normalization: full-scale sine (amp=1) ~ 0 dB
+    #mag = mag / (n_fft / 2.0)
 
-    return freqs, fft_magnitude_dbfs
+    freqs = np.fft.rfftfreq(n_fft, 1.0/fs)
+    mag_db = 20.0 * np.log10(mag + 1e-12)
+    return freqs, mag_db

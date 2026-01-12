@@ -12,7 +12,7 @@ import json
 from main import run_anc
 from utils.plot import (
     plot_filter_weights, plot_path_analysis, plot_error_analysis, plot_signal_flow,
-    plot_noise_spectrogram, plot_band_attenuation
+    plot_noise_spectrogram, plot_error_spectrogram, plot_band_attenuation
 )
 from utils.audio_utils import play_audio, stop_audio
 from scipy.io import wavfile
@@ -167,6 +167,7 @@ def build_single_ui(parent, state, default_font, header_font):
             pass
 
         # enable plot/audio after a run
+        state.unlock_ui()
         enable_buttons()
         on_noise_source_change()
 
@@ -188,27 +189,28 @@ def build_single_ui(parent, state, default_font, header_font):
         reset_result_labels()
         start_btn.config(state=tk.DISABLED)
         state.status_label.config(text="Running…", fg="black")
-        state.progress_var.set(0); state.progress_bar.update_idletasks()
+        state.progress_var.set(0)
+        state.progress_bar.update_idletasks()
 
         state.single_start_time = time.time()
         state.eta_label.config(text="ETA --:--")
         
         algorithm = state.algo_var.get()
-        #noise_source = state.noise_source_var.get()
-        #wav_file_path = state.wav_file_path.get()
 
         if state.noise_source_var.get() == "WAV":
             noise_type = os.path.basename(state.wav_file_path.get())
         else:
             noise_type = state.noise_var.get()
+        
+        state.lock_ui()
 
         init_log(run_kind="single", clear=True, log_dir=os.path.join(os.getcwd(), "results"))
 
         def progress_cb(pct):
-            parent.after(0, lambda p=pct: update_progress(p))
+            state.ui_call(update_progress, pct)
 
         def completion_cb(*args):
-            parent.after(0, lambda a=args: on_anc_complete(*a))
+            state.ui_call(on_anc_complete, *args)
 
         threading.Thread(
             target=run_anc,
@@ -220,6 +222,13 @@ def build_single_ui(parent, state, default_font, header_font):
 
     def validate_single_ready(*_):
         """Enable Start only when all required fields are filled and valid."""
+        if getattr(state, "is_locked", False):
+            try:
+                start_btn.config(state=tk.DISABLED)
+            except Exception:
+                pass
+            return
+        
         ok = True
         # Algorithm must be selected
         ok &= bool(state.algo_var.get())
@@ -266,13 +275,16 @@ def build_single_ui(parent, state, default_font, header_font):
             stop_audio()
             is_playing = False
             reset_play_buttons()
+            state.unlock_ui()
             return
         is_playing = True
         play_before_btn.config(text="Stop playing", state=tk.NORMAL)
-        play_after_btn.config(state=tk.DISABLED)
+        #play_after_btn.config(state=tk.DISABLED)
+        state.lock_ui(allow_widgets=(play_before_btn,))
         def _runner():
             play_audio(state.play_before, sample_rate=int(state.stored_fs))
-            parent.after(0, reset_play_buttons)
+            state.ui_call(reset_play_buttons)
+            state.ui_call(state.unlock_ui)
         threading.Thread(target=_runner, daemon=True).start()
 
     def toggle_play_after():
@@ -281,13 +293,16 @@ def build_single_ui(parent, state, default_font, header_font):
             stop_audio()
             is_playing = False
             reset_play_buttons()
+            state.unlock_ui()
             return
         is_playing = True
         play_after_btn.config(text="Stop playing", state=tk.NORMAL)
-        play_before_btn.config(state=tk.DISABLED)
+        #play_before_btn.config(state=tk.DISABLED)
+        state.lock_ui(allow_widgets=(play_after_btn,))
         def _runner():
             play_audio(state.play_after, sample_rate=int(state.stored_fs))
-            parent.after(0, reset_play_buttons)
+            state.ui_call(reset_play_buttons)
+            state.ui_call(state.unlock_ui)
         threading.Thread(target=_runner, daemon=True).start()
     
     def plot_filter():
@@ -345,6 +360,12 @@ def build_single_ui(parent, state, default_font, header_font):
             return
         
         plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs)
+    
+    def plot_error_spec():
+        if state.stored_error_signal is None:
+            state.status_label.config(text="No error signal available.", fg="red")
+            return
+        plot_error_spectrogram(state.stored_error_signal, state.stored_fs)
 
     def plot_band_attn():
         if state.stored_signal_after_primary is None or state.stored_error_signal is None:
@@ -363,10 +384,13 @@ def build_single_ui(parent, state, default_font, header_font):
             nlabel = (os.path.basename(state.wav_file_path.get())
                     if state.noise_source_var.get()=="WAV"
                     else state.noise_var.get())
-            base = os.path.join(os.getcwd(), "results", alg, "".join(c for c in nlabel if c.isalnum() or c in (" ","-","_")).strip().replace(" ","_"))
+            safe_noise = "".join(c for c in nlabel if c.isalnum() or c in (" ","-","_")).strip().replace(" ","_")
+            base_root = os.path.join(os.getcwd(), "results", alg, safe_noise)
+            base = os.path.join(base_root, f"L{int(L_local)}_mu{float(mu_local):.6g}")
             os.makedirs(base, exist_ok=True)
         except Exception as e:
-            state.status_label.config(text=f"Save failed: {e}", fg="red"); return
+            state.status_label.config(text=f"Save failed: {e}", fg="red")
+            return
 
         # build the todo list
         jobs = []
@@ -387,11 +411,9 @@ def build_single_ui(parent, state, default_font, header_font):
         def _write_audio():
             fs = int(state.stored_fs)
             # already float32 in [-1, 1]
-            #before = np.asarray(state.play_before, dtype=np.float32)
             after  = np.asarray(state.play_after,  dtype=np.float32)
 
             # convert to int16 for WAV
-            #before_i16 = (np.clip(before, -1.0, 1.0) * 32767.0).astype(np.int16)
             after_i16  = (np.clip(after,  -1.0, 1.0) * 32767.0).astype(np.int16)
 
             #wavfile.write(os.path.join(base, "input_before.wav"), fs, before_i16)
@@ -414,23 +436,24 @@ def build_single_ui(parent, state, default_font, header_font):
                             algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
                             convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
                             save_dir=base)))
-        jobs.append(("error_analysis", lambda: plot_error_analysis(state.stored_error_signal, state.stored_t, state.stored_fs,
-                            passive_cancelling=state.stored_signal_after_primary,
-                            algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
-                            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
-                            save_dir=base)))
+        jobs.append(("error_analysis", lambda: plot_error_analysis(state.stored_after_signal_raw, state.stored_t, state.stored_fs,
+                        passive_cancelling=state.stored_before_signal_raw,
+                        algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
+                        convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error)))
         jobs.append(("signal_flow", lambda: plot_signal_flow(state.stored_reference_signal, state.stored_noisy_signal, state.stored_error_signal,
                             state.stored_t, algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
                             convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
                             save_dir=base)))
         # optional extras often useful in a single-run dump
         jobs.append(("band_attenuation", lambda: plot_band_attenuation(state.stored_signal_after_primary, state.stored_error_signal,
-                            state.stored_fs, save_dir=base, filename="band_attenuation.png")))
+                            state.stored_fs, save_dir=base)))
         jobs.append(("noise_spectrogram", lambda: plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs, save_dir=base)))
+        jobs.append(("error_spectrogram", lambda: plot_error_spectrogram(state.stored_error_signal, state.stored_fs, save_dir=base)))
 
         total = len(jobs)
         state.status_label.config(text=f"Saving 0/{total}…", fg="black")
         state.disable_buttons_cb()
+        state.lock_ui()
 
         def _worker():
             done = 0
@@ -440,12 +463,14 @@ def build_single_ui(parent, state, default_font, header_font):
                 except Exception as e:
                     # keep going; report which artifact failed
                     msg = f"{name} failed: {e}"
-                    parent.after(0, lambda m=msg: state.status_label.config(text=m, fg="red"))
+                    state.ui_call(state.status_label.config, text=msg, fg="red")
                 done += 1
-                parent.after(0, lambda d=done: state.status_label.config(text=f"Saving {d}/{total}…", fg="black"))
-            parent.after(0, lambda: (state.enable_buttons_cb(),
-                                    state.status_label.config(text=f"Saved to: {base}", fg="green")))
-
+                state.ui_call(state.status_label.config, text=f"Saving {done}/{total}…", fg="black")
+            def _finish():
+                state.unlock_ui()
+                state.enable_buttons_cb()
+                state.status_label.config(text=f"Saved to: {base}", fg="green")
+            state.ui_call(_finish)
         threading.Thread(target=_worker, daemon=True).start()
     # ---------------- UI ----------------
     # Title
@@ -553,9 +578,12 @@ def build_single_ui(parent, state, default_font, header_font):
 
     spec_btn = tk.Button(graphs_frame, text="Noise Spectrogram", command=plot_noise_spec, state=tk.DISABLED)
     spec_btn.grid(row=1, column=1, sticky="ew")
+
+    err_spec_btn = tk.Button(graphs_frame, text="Error Spectrogram", command=plot_error_spec, state=tk.DISABLED)
+    err_spec_btn.grid(row=1, column=2, sticky="ew")
     
     band_btn = tk.Button(graphs_frame, text="Band Attenuation", command=plot_band_attn, state=tk.DISABLED)
-    band_btn.grid(row=1, column=2, sticky="ew")
+    band_btn.grid(row=1, column=3, sticky="ew")
 
     save_btn = tk.Button(parent, text="Save Results", command=save_single_results, state=tk.DISABLED)
     save_btn.grid(row=20, column=0, columnspan=2, sticky="ew")
@@ -568,8 +596,9 @@ def build_single_ui(parent, state, default_font, header_font):
     # Manage as a group if you need global disable/enable
     state.all_buttons.extend([
         play_before_btn, play_after_btn, save_btn,
-        fw_btn, pp_btn, sp_btn, ea_btn, sf_btn, spec_btn, band_btn
+        fw_btn, pp_btn, sp_btn, ea_btn, sf_btn, spec_btn, err_spec_btn, band_btn
     ])
+
 
     # expose callbacks to other panels
     state.start_single_run_cb = start_algorithm

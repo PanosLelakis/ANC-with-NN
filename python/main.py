@@ -28,19 +28,21 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
     start_time = time.time()
 
     # Load system impulse responses
-    #primary_path = loadmat("python/primary_path.mat")['sim_imp'].flatten()[:4000]
-    #secondary_path = loadmat("python/secondary_path.mat")['sim_imp'].flatten()[:2000]
-    #primary_path = mat73.loadmat("python/primary_path_new.mat")['sim_imp'].flatten()[:4000]
-    #secondary_path = loadmat("python/secondary_path_new.mat")['sim_imp'].flatten()[:2000]
-    fs, primary_path = wavfile.read("python/primary_paths/primary_anechoic.wav")
-    _, secondary_path = wavfile.read("python/secondary_paths/secondary_anechoic.wav")
-
-    # Normalize path impulse responses to have peak at 0 dBFS
-    primary_path = (primary_path / np.max(np.abs(primary_path))).astype(np.float32)
-    secondary_path = (secondary_path / np.max(np.abs(secondary_path))).astype(np.float32)
-    
+    primary_path = loadmat("python/primary_paths/primary_path.mat")['sim_imp'].flatten()[:4000]
+    secondary_path = loadmat("python/secondary_paths/secondary_path.mat")['sim_imp'].flatten()[:2000]
+    #primary_path = mat73.loadmat("python/primary_paths/primary_path_new.mat")['sim_imp'].flatten()[:4000]
+    #secondary_path = loadmat("python/secondary_paths/secondary_path_new.mat")['sim_imp'].flatten()[:2000]
+    #fs, primary_path = wavfile.read("python/primary_paths/primary_anechoic.wav")
+    #_, secondary_path = wavfile.read("python/secondary_paths/secondary_anechoic.wav")
+    fs = 44100
     primary_path = primary_path.astype(np.float32)
     secondary_path = secondary_path.astype(np.float32)
+
+    # Normalize path impulse responses to have peak at 0 dBFS
+    scale = np.max(np.abs(primary_path))
+    primary_path /= scale
+    secondary_path /= scale
+    
     #def _l2(x): return np.sqrt(np.sum(x.astype(np.float64)**2) + 1e-12)
     #primary_path  = primary_path  / _l2(primary_path)
     #secondary_path= secondary_path/ _l2(secondary_path)
@@ -57,12 +59,12 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type, noise_wav_path, dur
         # mono
         if wav_data.ndim > 1:
             wav_data = wav_data.mean(axis=1)
+        
+        wav = wav_data.astype(np.float32)
         # scale ints to [-1,1]
         if np.issubdtype(wav_data.dtype, np.integer):
-            max_i = max(1.0, float(np.iinfo(wav_data.dtype).max))
-            wav = wav_data.astype(np.float32) / max_i
-        else:
-            wav = wav_data.astype(np.float32)
+            wav /= max(1.0, float(np.iinfo(wav_data.dtype).max))
+
         # resample
         if wav_fs != fs:
             new_len = int(len(wav) * fs / wav_fs)

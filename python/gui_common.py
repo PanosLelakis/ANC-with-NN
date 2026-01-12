@@ -74,6 +74,8 @@ class SharedState:
     last_L_vals  = None
 
 def build_and_run():
+    import queue
+    
     # Build main program window
     root = tk.Tk()
     root.title("ANC with NN — Single & Multi Run")
@@ -104,6 +106,97 @@ def build_and_run():
     for f in (left_frame, right_frame):
         f.grid_columnconfigure(0, weight=0)
         f.grid_columnconfigure(1, weight=1)
+
+    state.root = root
+    state._locked_widget_states = {}
+    state.is_locked = False
+    state.is_closing = False
+    state.ui_queue = queue.Queue()
+
+    def ui_call(fn, *args, **kwargs):
+        # Safe from ANY thread; does not touch Tk
+        if getattr(state, "is_closing", False):
+            return
+        try:
+            state.ui_queue.put((fn, args, kwargs))
+        except Exception:
+            pass
+
+    def _drain_ui_queue():
+        # Runs on main Tk thread only
+        try:
+            while True:
+                fn, args, kwargs = state.ui_queue.get_nowait()
+                try:
+                    fn(*args, **kwargs)
+                except Exception:
+                    pass
+        except queue.Empty:
+            pass
+        # schedule next drain
+        try:
+            if root.winfo_exists():
+                root.after(15, _drain_ui_queue)
+        except Exception:
+            pass
+
+    state.ui_call = ui_call
+    root.after(15, _drain_ui_queue)
+
+    def _walk_widgets(w):
+        for ch in w.winfo_children():
+            yield ch
+            yield from _walk_widgets(ch)
+
+    def lock_ui(allow_widgets=()):
+        """
+        Disable every widget that has a 'state' option, except those in allow_widgets.
+        Preserves original state so we can restore precisely (e.g. readonly combobox).
+        """
+        allow = set(allow_widgets)
+        if state.is_locked:
+            return
+        state.is_locked = True
+        state._locked_widget_states = {}
+
+        for w in _walk_widgets(root):
+            if w in allow:
+                continue
+            try:
+                if "state" in w.keys():
+                    prev = w.cget("state")
+                    state._locked_widget_states[w] = prev
+                    w.configure(state="disabled")
+            except Exception:
+                pass
+
+    def unlock_ui():
+        if not state.is_locked:
+            return
+        for w, prev in list(state._locked_widget_states.items()):
+            try:
+                if w.winfo_exists():
+                    w.configure(state=prev)
+            except Exception:
+                pass
+        state._locked_widget_states = {}
+        state.is_locked = False
+
+    state.lock_ui = lock_ui
+    state.unlock_ui = unlock_ui
+
+    # Block closing the window while locked (prevents mid-save shutdown)
+    def on_close():
+        if state.is_locked:
+            return
+        state.is_closing = True
+        try:
+            from utils.audio_utils import stop_audio
+            stop_audio()
+        except Exception:
+            pass
+        root.destroy()
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
     root.mainloop()
 
