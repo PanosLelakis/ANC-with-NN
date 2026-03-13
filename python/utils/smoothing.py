@@ -1,130 +1,108 @@
 import numpy as np
-from scipy.signal import medfilt
 
-#def smooth_signal(signal, kernel_size):
-    #if kernel_size % 2 == 0:
-        #kernel_size += 1
-    #return medfilt(signal, kernel_size)
-
-def smooth_signal(signal, kernel_size):
-    x = np.asarray(signal, dtype=float)
-    k = int(kernel_size)
-    if k <= 1:
-        return x
-    if (k % 2) == 0:
-        k += 1
-    w = np.ones(k, dtype=float) / float(k)
-    return np.convolve(x, w, mode="same")
-
-def smooth_fractional_octave(freqs_hz, values_db, fraction=6, min_bins=5, max_bins=199, scale=2.0):
+def clamp_odd_window(desired, n):
     """
-    Median smoothing with window size ~ fractional-octave bandwidth.
-    Window (in bins) grows with frequency (constant-Q idea).
-    'fraction' = 6  -> 1/6-octave base window.
-    'scale'    > 1  -> multiplies the window size across ALL frequencies.
-
-    Larger 'scale' -> more smoothing at all freqs; window remains frequency-dependent.
+    Returns an odd window length <= n and >= 3 (or 1 if n<3).
     """
-    freqs = np.asarray(freqs_hz, dtype=float)
-    vals  = np.asarray(values_db, dtype=float)
-    out   = np.empty_like(vals)
+    w = int(desired)
+    if n < 3:
+        return 1
+    if w < 3:
+        w = 3
+    if w % 2 == 0:
+        w += 1
+    if w > n:
+        w = n if (n % 2 == 1) else (n - 1)
+    if w < 3:
+        return 1
+    return w
 
-    # helper: clamp & ensure odd length
-    def _odd(n):
-        n = int(max(min_bins, min(max_bins, n)))
-        return n if (n % 2) == 1 else n + 1
-
-    # log-frequency spacing; bins-per-octave ~ 1 / Δlog2(f)
-    logf = np.log2(np.maximum(freqs, 1e-3))
-    dlog = np.gradient(logf)
-
-    # base width (in bins) for 1/fraction octave, then scale up globally
-    width_bins = (1.0 / float(fraction)) / np.maximum(dlog, 1e-6)
-    width_bins = np.round(width_bins * float(scale)).astype(int)
-
-    # median with varying window
-    for i in range(len(vals)):
-        w  = _odd(width_bins[i])
-        lo = max(0, i - w // 2)
-        hi = min(len(vals), i + w // 2 + 1)
-        out[i] = np.median(vals[lo:hi])
-    return out
-
-def smooth_time_median(values_db, fs, window_ms=100):
+def sg_smooth(y, window, order=3):
     """
-    Median smoothing in time domain using a window specified in milliseconds.
-    Ensures odd window length; clamps to at least 3 samples.
+    Savitzky-Golay smoothing with safe window clamping.
     """
-    vals = np.asarray(values_db, dtype=float)
-    # samples for requested ms
-    w = int(round((window_ms / 1000.0) * float(fs)))
-    if w < 3: w = 3
-    if (w % 2) == 0: w += 1  # odd
-    return medfilt(vals, kernel_size=w)
-
+    #y = np.asarray(y, dtype=float)
+    #w = clamp_odd_window(window, len(y))
+    #if w < 3:
+        #return y
+    w = window
+    return savitzky_golay(y, w, order=order)
+    
 def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     """Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
     The Savitzky-Golay filter removes high frequency noise from data.
     It has the advantage of preserving the original shape and
     features of the signal better than other types of filtering
     approaches, such as moving averages techniques.
-    Parameters
-    ----------
-    y : array_like, shape (N,)
-    the values of the time history of the signal.
-    window_size : int
-    the length of the window. Must be an odd integer number.
-    order : int
-    the order of the polynomial used in the filtering.
-    Must be less then `window_size` - 1.
-    deriv: int
-    the order of the derivative to compute (default = 0 means only smoothing)
-    Returns
-    -------
-    ys : ndarray, shape (N)
-    the smoothed signal (or it's n-th derivative).
-    Notes
-    -----
-    The Savitzky-Golay is a type of low-pass filter, particularly
-    suited for smoothing noisy data. The main idea behind this
-    approach is to make for each point a least-square fit with a
-    polynomial of high order over a odd-sized window centered at
-    the point.
-
-    References
-    ----------
-    [1] A. Savitzky, M. J. E. Golay, Smoothing and Differentiation of
-    Data by Simplified Least Squares Procedures. Analytical
-    Chemistry, 1964, 36 (8), pp 1627-1639.
-    [2] Numerical Recipes 3rd Edition: The Art of Scientific Computing
-    W.H. Press, S.A. Teukolsky, W.T. Vetterling, B.P. Flannery
-    Cambridge University Press ISBN-13: 9780521880688
+    - window_size: must be odd
+    - order: polynomial order
+    - deriv: derivative order (0 = smoothing)
+    - rate: sampling rate-like factor (kept for compatibility with your old function)
     """
     import numpy as np
-    from math import factorial
+    from scipy.signal import savgol_filter
 
-    try:
-        window_size = abs(int(window_size))
-        order = abs(int(order))
-    except ValueError:
-        raise ValueError("window_size and order have to be of type int")
-    
-    if window_size % 2 != 1 or window_size < 1:
-        raise TypeError("window_size size must be a positive odd number")
-    
+    y = np.asarray(y, dtype=float)
+
+    window_size = abs(int(window_size))
+    order = abs(int(order))
+
+    if window_size < 3:
+        return y
+
+    # must be odd
+    if window_size % 2 == 0:
+        window_size += 1
+
+    # must satisfy window_size >= order + 2
     if window_size < order + 2:
-        raise TypeError("window_size is too small for the polynomials order")
+        window_size = order + 2
+        if window_size % 2 == 0:
+            window_size += 1
+
+    # clamp window to signal length (must be <= len(y) and odd)
+    if len(y) < window_size:
+        window_size = len(y) if (len(y) % 2 == 1) else max(1, len(y) - 1)
+        if window_size < 3:
+            return y
+
+    # delta corresponds to sample spacing; keep compatibility with "rate"
+    delta = 1.0 / float(rate) if rate else 1.0
+
+    return savgol_filter(y, window_length=window_size, polyorder=order,
+                         deriv=deriv, delta=delta, mode="interp")
+
+def whittaker_eilers_smooth(y, lmbd=1e8, order=2, weights=None, x_input=None):
+    """
+    Whittaker-Eilers penalized least-squares smoothing.
+
+    Parameters
+    ----------
+    y : array-like
+        Input data (1D).
+    lmbd : float
+        Smoothing strength (bigger => smoother). Typical range: 1e2 ... 1e7.
+    d : int
+        Difference order (usually 2).
+    w : array-like or None
+        Optional weights (same length as y). If None, all ones.
+
+    Returns
+    -------
+    z : np.ndarray
+        Smoothed signal.
+    """
+    from whittaker_eilers import WhittakerSmoother
+
+    ws = None if weights is None else np.asarray(weights, dtype=float).tolist()
+    xi = None if x_input is None else np.asarray(x_input, dtype=float).tolist()
+
+    smoother = WhittakerSmoother(
+        lmbda=float(lmbd),
+        order=int(order),
+        data_length=int(len(y)),
+        x_input=xi,
+        weights=ws
+    )
     
-    order_range = range(order+1)
-    half_window = (window_size -1) // 2
-    
-    # precompute coefficients
-    b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
-    m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
-    
-    # pad the signal at the extremes with values taken from the signal itself
-    firstvals = y[0] - np.abs( y[1:half_window+1][::-1] - y[0] )
-    lastvals = y[-1] + np.abs(y[-half_window-1:-1][::-1] - y[-1])
-    y = np.concatenate((firstvals, y, lastvals))
-    
-    return np.convolve( m[::-1], y, mode='valid')
+    return np.asarray(smoother.smooth(y.tolist()), dtype=float)

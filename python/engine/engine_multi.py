@@ -1,6 +1,6 @@
 import numpy as np
 from joblib import Parallel, delayed
-from single_sim import simulate_once
+from engine.engine_single import simulate_once
 
 def _linspace_inclusive(a, b, n):
     n = int(n)
@@ -30,15 +30,10 @@ def average_replicates(res_list):
         sse_db  = float(np.median([it["sse_db"]  for it in items]))
         in_p    = float(np.median([it["in_power"] for it in items]))
         out_p   = float(np.median([it["out_power"] for it in items]))
-        e_tail  = items[0]["e_mic_raw_tail"]
-        d_tail  = items[0]["d_mic_raw_tail"]
         fs      = items[0]["fs"]
         aggregated.append({
-            "L": L, "mu": mu,
-            "conv_ms": conv_ms, "sse_db": sse_db,
-            "in_power": in_p, "out_power": out_p,
-            "fs": fs, "e_mic_raw_tail": e_tail, "d_mic_raw_tail": d_tail
-        })
+            "L": L, "mu": mu, "conv_ms": conv_ms, "sse_db": sse_db,
+            "in_power": in_p, "out_power": out_p, "fs": fs})
     return aggregated
 
 def score_results(results, duration_s, w_conv=0.5, w_sse=0.5, normalize="dataset"):

@@ -1,22 +1,21 @@
 import numpy as np
 
 class FxLMS:
-    def __init__(self, L, mu, w, dtype=np.float64):
-        self.L = L
-        self.mu = mu
+    def __init__(self, L, mu, w, dtype=np.float32):
+        self.L = int(L)
+        self.mu = float(mu)
         self.w = np.array(w, dtype=dtype, copy=True)
-        self.u = np.zeros(self.L, dtype=dtype)
+
+        self.u_x  = np.zeros(self.L, dtype=dtype)   # raw-x buffer
+        self.u_xf = np.zeros(self.L, dtype=dtype)   # filtered-x buffer
 
     def predict(self, x):
-        self.u[1:] = self.u[:-1]
-        self.u[0] = x
-        return np.dot(self.w, self.u)
+        self.u_x[1:] = self.u_x[:-1]
+        self.u_x[0] = x
+        return float(np.dot(self.w, self.u_x))
 
-    def adapt(self, error):
-        self.w += self.mu * error * self.u
-
-    def estimate(self, x, d):
-        y = self.predict(x)
-        e = d - y
-        self.adapt(e)
-        return e, y
+    def adapt(self, error, x_f):
+        self.u_xf[1:] = self.u_xf[:-1]
+        self.u_xf[0] = x_f
+        # LMS update (no normalization)
+        self.w += 2 * self.mu * float(error) * self.u_xf

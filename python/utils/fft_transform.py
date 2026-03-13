@@ -1,8 +1,8 @@
 import numpy as np
 
-def compute_fft(signal, fs, n_fft=None):
+def compute_fft(signal, fs, n_fft=None, scaling=None):
     """
-    Computes the FFT of a signal and returns the frequency spectrum in dBFS.
+    Computes the FFT of a signal and returns the frequency spectrum in dB.
 
     Parameters:
     - signal (numpy array): Input time-domain signal.
@@ -24,11 +24,16 @@ def compute_fft(signal, fs, n_fft=None):
         n_fft = N
 
     X = np.fft.rfft(x, n=n_fft)
+    #X = np.fft.rfft(x)
     mag = np.abs(X)
 
-    # amplitude normalization: full-scale sine (amp=1) ~ 0 dB
-    #mag = mag / (n_fft / 2.0)
+    if scaling is not None:
+        # Scale by length/2 (the term /2 is because we are
+        # using rfft - only the real parth of the fft)
+        mag = mag / (n_fft / 2.0)
 
     freqs = np.fft.rfftfreq(n_fft, 1.0/fs)
+    
     mag_db = 20.0 * np.log10(mag + 1e-12)
+    #freqs = np.linspace(0, fs / 2, len(mag_db))
     return freqs, mag_db

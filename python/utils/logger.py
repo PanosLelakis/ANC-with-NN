@@ -23,7 +23,7 @@ def init_log(run_kind: str, clear: bool = True, log_dir: str = "."):
                 "algorithm", "source", "noise_label",
                 "L", "mu",
                 "conv_ms", "sse_db", "exec_time_s",
-                "in_power", "out_power",
+                "power_anc_off", "power_anc_on",
                 "save_path", "message"
             ])
     # header written; subsequent rows will append

@@ -7,9 +7,19 @@ import time
 import math
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from main import run_anc_headless
+from engine.engine_single import run_anc_headless
 from utils.logger import log_case, init_log
 from utils.plot import plot_hparam_heatmap, plot_convtime_vs_mu, plot_sse_vs_L
+
+def compute_noise_types(combos):
+    noise_types = set()
+    for (alg, src, nlabel, wfp) in combos:
+        if src == "Stationary":
+            noise_types.add((alg, "Stationary", nlabel))
+        else:
+            # use the label already stored (basename) or derive from path
+            noise_types.add((alg, "WAV", nlabel))
+    return len(noise_types)
 
 def build_multi_ui(parent, state, default_font, header_font):
     ranked = None
@@ -143,7 +153,7 @@ def build_multi_ui(parent, state, default_font, header_font):
             item = {
                 "L": int(r["L"]), "mu": float(r["mu"]),
                 "conv_ms": float(r["conv_ms"]), "sse_db": float(r["sse_db"]),
-                "in_power": float(r["in_power"]), "out_power": float(r["out_power"]),
+                "power_anc_off": float(r["in_power"]), "power_anc_on": float(r["out_power"]),
                 "score": float(s), "conv_norm": float(cn), "rms_e": float(re),
                 # metadata
                 "algorithm": r.get("algorithm",""),
@@ -215,13 +225,14 @@ def build_multi_ui(parent, state, default_font, header_font):
         try:
             for (alg, src, nlabel) in combos:
                 rows = [x for x in ranked_loc if x.get("algorithm")==alg and x.get("source")==src and x.get("noise_label")==nlabel]
-                plot_convtime_vs_mu(rows, save_dir=None, title_suffix=f"{alg} | {nlabel}")
+                plot_convtime_vs_mu(rows, save_dir=None, title_suffix=f"{alg} | {nlabel}",
+                    algorithm_name=alg, noise_type=nlabel)
         except Exception as e:
             mr_status.config(text=f"Plot error: {e}", fg="red")
 
     def show_sse_vs_L():
         ranked_loc = state.last_ranked
-        if ranked_loc:
+        if ranked_loc is None:
             mr_status.config(text="No results to plot yet.", fg="red")
             return
 
@@ -236,7 +247,8 @@ def build_multi_ui(parent, state, default_font, header_font):
         try:
             for (alg, src, nlabel) in combos:
                 rows = [x for x in ranked_loc if x.get("algorithm")==alg and x.get("source")==src and x.get("noise_label")==nlabel]
-                plot_sse_vs_L(rows, save_dir=None, title_suffix=f"{alg} | {nlabel}")
+                plot_sse_vs_L(rows, save_dir=None, title_suffix=f"{alg} | {nlabel}",
+                    algorithm_name=alg, noise_type=nlabel)
         except Exception as e:
             mr_status.config(text=f"Plot error: {e}", fg="red")
     
@@ -341,7 +353,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                 for (mu, L) in muL:
                     for (alg, src, nlabel, wfp) in combos:
                         fut = ex.submit(run_anc_headless, alg, int(L), float(mu),
-                                        src, (nlabel if src=="Stationary" else nlabel), wfp, dur, None)
+                                        src, (nlabel if src=="Stationary" else nlabel), wfp, dur)
                         fut_meta[fut] = {"algorithm": alg, "source": src, "noise_label": nlabel, "wav_path": wfp}
                 for fut in as_completed(fut_meta):
                     meta = fut_meta[fut]
@@ -384,7 +396,9 @@ def build_multi_ui(parent, state, default_font, header_font):
                 elapsed = time.time() - start_t
                 if not ranked:
                     mr_status.config(text="No valid results.", fg="red")
+                    state.unlock_ui()
                     start_multi_btn.config(state=tk.NORMAL)
+                    validate_multi_ready()
                     return
                 best = ranked[0]
                 state.best_mu = float(best["mu"]); state.best_L = int(best["L"])
@@ -400,25 +414,45 @@ def build_multi_ui(parent, state, default_font, header_font):
                         f"score={best['score']:.3f}, conv={best['conv_ms']:.2f} ms, sse={best['sse_db']:.2f} dB"),
                     fg="green"
                 )
-                run_best_btn.config(state=tk.NORMAL)
+
+                unique_noise_types = compute_noise_types(combos)
+                
+                if unique_noise_types == 1:
+                    # show best metrics normally
+                    best_mu_val.config(text=f"μ: {state.best_mu:.6g}")
+                    best_L_val.config(text=f"L: {state.best_L:d}")
+                    best_conv_val.config(text=f"Convergence speed: {best['conv_ms']:.2f} ms")
+                    best_sse_val.config(text=f"SSE: {best['sse_db']:.2f} dB")
+                
                 start_multi_btn.config(state=tk.NORMAL)
-                show_heatmap_btn.config(state=tk.NORMAL)
-                show_conv_btn.config(state=tk.NORMAL)
-                show_sse_btn.config(state=tk.NORMAL)
-                state.last_ranked = ranked
-                state.last_mu_vals = mu_vals
-                state.last_L_vals = L_vals
-                best_mu_val.config(text=f"μ: {state.best_mu:.6g}")
-                best_L_val.config(text=f"L: {state.best_L:d}")
-                best_conv_val.config(text=f"Convergence speed: {best['conv_ms']:.2f} ms")
-                best_sse_val.config(text=f"SSE: {best['sse_db']:.2f} dB")
+                #state.last_ranked = ranked
+                #state.last_mu_vals = mu_vals
+                #state.last_L_vals = L_vals
                 mr_exec_label.config(text=f"Execution time (sec): {elapsed:.2f}")
 
                 # Optional saving
                 mode = save_mode_var.get().lower()
                 if mode == "none":
                     state.unlock_ui()
+                    validate_multi_ready()
+                    if unique_noise_types == 1:
+                        run_best_btn.config(state=tk.NORMAL)
+                        show_heatmap_btn.config(state=tk.NORMAL)
+                        show_conv_btn.config(state=tk.NORMAL)
+                        show_sse_btn.config(state=tk.NORMAL)
+                    else:
+                        run_best_btn.config(state=tk.DISABLED)
+                        show_heatmap_btn.config(state=tk.DISABLED)
+                        show_conv_btn.config(state=tk.DISABLED)
+                        show_sse_btn.config(state=tk.DISABLED)
                 else:
+                    # remain locked during saving
+                    run_best_btn.config(state=tk.DISABLED)
+                    show_heatmap_btn.config(state=tk.DISABLED)
+                    show_conv_btn.config(state=tk.DISABLED)
+                    show_sse_btn.config(state=tk.DISABLED)
+                    start_multi_btn.config(state=tk.DISABLED)
+                    state.lock_ui()
                     # count "heatmap per combo" + "case saves"
                     unique_combos = []
                     seen = set()
@@ -436,7 +470,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                     mr_status.config(text=f"Saving 0/{total_save_jobs}…", fg="black")
                     
                     def _save_all_or_best():
-                        from main import run_anc # full sim for complete signals
+                        from engine.engine_single import run_anc # full sim for complete signals
                         from utils import plot as U
                         #import matplotlib.pyplot as plt
                         import gc, time
@@ -465,8 +499,8 @@ def build_multi_ui(parent, state, default_font, header_font):
                                                                 r.get("noise_label")==nlabel]
                             if ranked_for_combo:
                                 U.plot_hparam_heatmap(ranked_for_combo, mu_vals, L_vals, save_dir=base_root)
-                                U.plot_convtime_vs_mu(ranked_for_combo, save_dir=base_root, title_suffix=f"{alg} | {nlabel}")
-                                U.plot_sse_vs_L(ranked_for_combo, save_dir=base_root, title_suffix=f"{alg} | {nlabel}")
+                                U.plot_convtime_vs_mu(ranked_for_combo, save_dir=base_root, algorithm_name=alg, noise_type=nlabel)
+                                U.plot_sse_vs_L(ranked_for_combo, save_dir=base_root, algorithm_name=alg, noise_type=nlabel)
                             bump_save_progress()
                         
                         def _run_and_save(alg, src, nlabel, wfp, Lx, mux):
@@ -496,16 +530,17 @@ def build_multi_ui(parent, state, default_font, header_font):
                                 from scipy.io import wavfile
                                 fs = int(payload["fs"])
                                 before = np.asarray(payload["before_raw"], dtype=np.float32)
-                                after  = np.asarray(payload["after_raw"],  dtype=np.float32)
+                                after = np.asarray(payload["after_raw"], dtype=np.float32)
+                                after = np.nan_to_num(after, nan=0.0, posinf=0.0, neginf=0.0)
 
                                 # scale both with same factor to avoid “fake” improvement due to different scaling
                                 max_abs = max(float(np.max(np.abs(before))), float(np.max(np.abs(after))), 1e-6)
                                 scale = min(1.0, 0.99 / max_abs)
                                 #before = np.clip(before * scale, -1.0, 1.0)
-                                after  = np.clip(after  * scale, -1.0, 1.0)
+                                after = np.clip(after * scale, -1.0, 1.0)
 
                                 #before_i16 = (before * 32767.0).astype(np.int16)
-                                after_i16  = (after  * 32767.0).astype(np.int16)
+                                after_i16 = (after * 32767.0).astype(np.int16)
 
                                 #wavfile.write(os.path.join(base, "input_before.wav"), fs, before_i16)
                                 wavfile.write(os.path.join(base, "output.wav"), fs, after_i16)
@@ -549,19 +584,21 @@ def build_multi_ui(parent, state, default_font, header_font):
                                         f.write("Divergence detected (non-finite or huge weights).")
 
                                 # --- save a single spectrogram per noise (if not already there)
-                                spec_path = os.path.join(base_root, "noise_spectrogram.png")
-                                if not os.path.exists(spec_path):
+                                #spec_path = os.path.join(base_root, "noise_spectrogram.png")
+                                if not os.path.exists(os.path.join(base_root, "noise_spectrogram.png")):
                                     U.plot_noise_spectrogram(payload["noisy"], payload["fs"], save_dir=base_root)
 
                                 if not diverged:  # skip heavy plotting if diverged
-                                    U.plot_band_attenuation(payload["before_raw"], payload["after_raw"], payload["fs"], save_dir=base)
+                                    U.plot_band_attenuation(payload["before_raw"], payload["after_raw"], payload["fs"],
+                                                            save_dir=base, algorithm_name=alg, mu=mux, L=Lx, noise_type=nlabel,
+                                                            convergence_time=payload.get("conv_ms"), steady_state_error=payload.get("sse_db"))
                                     U.plot_error_spectrogram(payload["error"], payload["fs"], save_dir=base)
                                     U.plot_filter_weights(payload["fs"], payload["wf"], alg, mux, Lx, nlabel,
                                                         payload["conv_ms"], payload["sse_db"], save_dir=base)
-                                    U.plot_path_analysis(payload["pir"], payload["noisy"], payload["d"], payload["t"], payload["fs"],
+                                    U.plot_path_analysis(payload["pir"], payload["noisy"], payload["d"], payload["fs"],
                                                         "Primary", alg, mux, Lx, nlabel, payload["conv_ms"], payload["sse_db"], save_dir=base)
                                     if payload["z"] is not None:
-                                        U.plot_path_analysis(payload["sir"], payload["noisy"], payload["z"], payload["t"], payload["fs"],
+                                        U.plot_path_analysis(payload["sir"], payload["noisy"], payload["z"], payload["fs"],
                                                             "Secondary", alg, mux, Lx, nlabel, payload["conv_ms"], payload["sse_db"], save_dir=base)
                                     U.plot_error_analysis(payload["after_raw"], payload["t"], payload["fs"],
                                                             passive_cancelling=payload["before_raw"],
@@ -615,12 +652,21 @@ def build_multi_ui(parent, state, default_font, header_font):
                         def _save_done():
                             mr_progress_var.set(100.0)
                             state.unlock_ui()
+                            if unique_noise_types == 1:
+                                run_best_btn.config(state=tk.NORMAL)
+                                show_heatmap_btn.config(state=tk.NORMAL)
+                                show_conv_btn.config(state=tk.NORMAL)
+                                show_sse_btn.config(state=tk.NORMAL)
+                            else:
+                                run_best_btn.config(state=tk.DISABLED)
+                                show_heatmap_btn.config(state=tk.DISABLED)
+                                show_conv_btn.config(state=tk.DISABLED)
+                                show_sse_btn.config(state=tk.DISABLED)
                             validate_multi_ready()  # refresh Start button enable state
                             mr_status.config(text=f"Saved all results to: {os.path.join(os.getcwd(),'results')}", fg="green")
 
                         state.ui_call(_save_done)
-
-                    state.lock_ui()    
+  
                     threading.Thread(target=_save_all_or_best, daemon=False).start()
 
             state.ui_call(ui_done)
@@ -726,7 +772,7 @@ def build_multi_ui(parent, state, default_font, header_font):
 
     # --- Save Results mode ---
     tk.Label(parent, text="Save Results:", font=default_font).grid(row=15, column=0, sticky="e")
-    save_mode_var = tk.StringVar(value="None")
+    save_mode_var = tk.StringVar(value="All")
     save_frame = tk.Frame(parent)
     save_frame.grid(row=15, column=1, sticky="w")
     for txt in ["None","Best","All"]:
@@ -767,11 +813,17 @@ def build_multi_ui(parent, state, default_font, header_font):
                                command=lambda: _run_best_from_multi(state), state=tk.DISABLED)
     run_best_btn.grid(row=22, column=0, columnspan=2, sticky="ew")
 
-    show_heatmap_btn = tk.Button(parent, text="Plot Heatmap", command=show_heatmap, state=tk.DISABLED)
-    show_heatmap_btn.grid(row=23, column=0, columnspan=2, sticky="ew")
+    plot_row = tk.Frame(parent)
+    plot_row.grid(row=23, column=0, columnspan=3, sticky="ew")
+    plot_row.grid_columnconfigure(0, weight=1)
+    plot_row.grid_columnconfigure(1, weight=1)
+    plot_row.grid_columnconfigure(2, weight=1)
 
-    show_conv_btn = tk.Button(parent, text="Plot Convergence vs μ", command=show_conv_vs_mu, state=tk.DISABLED)
-    show_conv_btn.grid(row=24, column=0, columnspan=2, sticky="ew")
+    show_heatmap_btn = tk.Button(plot_row, text="Plot Heatmap", command=show_heatmap, state=tk.DISABLED)
+    show_heatmap_btn.grid(row=0, column=0, sticky="ew")
 
-    show_sse_btn = tk.Button(parent, text="Plot SSE vs L", command=show_sse_vs_L, state=tk.DISABLED)
-    show_sse_btn.grid(row=25, column=0, columnspan=2, sticky="ew")
+    show_conv_btn = tk.Button(plot_row, text="Plot Convergence vs μ", command=show_conv_vs_mu, state=tk.DISABLED)
+    show_conv_btn.grid(row=0, column=1, sticky="ew")
+
+    show_sse_btn = tk.Button(plot_row, text="Plot SSE vs L", command=show_sse_vs_L, state=tk.DISABLED)
+    show_sse_btn.grid(row=0, column=2, sticky="ew")

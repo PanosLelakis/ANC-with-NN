@@ -1,8 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
-import gui_single
-import gui_multi
+from gui.gui_single import build_single_ui
+from gui.gui_multi import build_multi_ui
 
 class SharedState:
     """Holds shared Tk variables, references to widgets, and simulation data."""
@@ -32,9 +32,6 @@ class SharedState:
     stored_signal_after_primary = None
     stored_signal_after_secondary = None
     stored_error_signal = None
-    stored_filtered_signal = None
-    stored_error_signal_raw = None
-    stored_filtered_signal_raw = None
     stored_t = None
     stored_fs = 44100
     stored_initial_weights = None
@@ -69,9 +66,9 @@ class SharedState:
     wav_label_ref = None  # set by gui_single
 
     # Last multi-run artifacts for plotting
-    last_ranked = None
-    last_mu_vals = None
-    last_L_vals  = None
+    #last_ranked = None
+    #last_mu_vals = None
+    #last_L_vals = None
 
 def build_and_run():
     import queue
@@ -92,16 +89,17 @@ def build_and_run():
     header_font  = tkfont.Font(size=12, weight="bold")
 
     state = SharedState()
-    # Only these have defaults
-    state.algo_var = tk.StringVar(value="FxLMS")
+    # Set default values
+    state.algo_var = tk.StringVar(value="FxNLMS")
     state.noise_source_var = tk.StringVar(value="Stationary")
     state.noise_var = tk.StringVar(value="White")
     state.wav_file_path = tk.StringVar(value="")
-    state.all_buttons = []
+    state.all_buttons = [] # All buttons list
+    state.ui_drain_after_id = None
 
     # Add single (left) and multi (right) run guis to main window
-    gui_single.build_single_ui(left_frame, state, default_font, header_font)
-    gui_multi.build_multi_ui(right_frame, state, default_font, header_font)
+    build_single_ui(left_frame, state, default_font, header_font)
+    build_multi_ui(right_frame, state, default_font, header_font)
 
     for f in (left_frame, right_frame):
         f.grid_columnconfigure(0, weight=0)
@@ -114,10 +112,15 @@ def build_and_run():
     state.ui_queue = queue.Queue()
 
     def ui_call(fn, *args, **kwargs):
-        # Safe from ANY thread; does not touch Tk
+        # Safe from ANY thread - does not touch Tk
         if getattr(state, "is_closing", False):
             return
         try:
+            try:
+                if not root.winfo_exists():
+                    return
+            except Exception:
+                return
             state.ui_queue.put((fn, args, kwargs))
         except Exception:
             pass
@@ -135,8 +138,8 @@ def build_and_run():
             pass
         # schedule next drain
         try:
-            if root.winfo_exists():
-                root.after(15, _drain_ui_queue)
+            if root.winfo_exists() and not getattr(state, "is_closing", False):
+                state.ui_drain_after_id = root.after(15, _drain_ui_queue)
         except Exception:
             pass
 
@@ -185,17 +188,25 @@ def build_and_run():
     state.lock_ui = lock_ui
     state.unlock_ui = unlock_ui
 
-    # Block closing the window while locked (prevents mid-save shutdown)
     def on_close():
-        if state.is_locked:
-            return
         state.is_closing = True
+
+        # cancel scheduled UI drain
+        try:
+            if getattr(state, "ui_drain_after_id", None) is not None:
+                root.after_cancel(state.ui_drain_after_id)
+                state.ui_drain_after_id = None
+        except Exception:
+            pass
+
         try:
             from utils.audio_utils import stop_audio
             stop_audio()
         except Exception:
             pass
+
         root.destroy()
+
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     root.mainloop()

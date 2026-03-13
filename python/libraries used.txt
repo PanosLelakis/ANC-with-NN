@@ -5,3 +5,5 @@ mat73
 matplotlib
 tqdm
 joblib
+whittaker-eilers
+h5py

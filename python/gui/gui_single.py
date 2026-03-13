@@ -6,10 +6,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
-from utils.logger import init_log#, log_case
-import os
 import json
-from main import run_anc
+from utils.logger import init_log#, log_case
+from engine.engine_single import run_anc
 from utils.plot import (
     plot_filter_weights, plot_path_analysis, plot_error_analysis, plot_signal_flow,
     plot_noise_spectrogram, plot_error_spectrogram, plot_band_attenuation
@@ -289,6 +288,7 @@ def build_single_ui(parent, state, default_font, header_font):
 
     def toggle_play_after():
         nonlocal is_playing
+        
         if is_playing and play_after_btn["text"] == "Stop playing":
             stop_audio()
             is_playing = False
@@ -305,25 +305,26 @@ def build_single_ui(parent, state, default_font, header_font):
             state.ui_call(state.unlock_ui)
         threading.Thread(target=_runner, daemon=True).start()
     
-    def plot_filter():
+    def plot_filter(save_dir=None):
         nonlocal mu, L, algorithm, noise_type
 
         plot_filter_weights(
             fs=state.stored_fs, w_final=state.stored_final_weights,
             algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error
+            convergence_time=state.stored_convergence_speed,
+            steady_state_error=state.stored_steady_state_error, save_dir=save_dir
         )
 
-    def plot_primary_path_effect():
+    def plot_primary_path_effect(save_dir=None):
         nonlocal mu, L, algorithm, noise_type
 
         plot_path_analysis(
-            state.stored_primary_ir, state.stored_noisy_signal, state.stored_signal_after_primary, state.stored_t, state.stored_fs,
+            state.stored_primary_ir, state.stored_noisy_signal, state.stored_signal_after_primary, state.stored_fs,
             title_prefix="Primary", algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error
+            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error, save_dir=save_dir
         )
 
-    def plot_secondary_path_effect():
+    def plot_secondary_path_effect(save_dir=None):
         nonlocal mu, L, algorithm, noise_type
 
         if state.stored_signal_after_secondary is None:
@@ -331,49 +332,83 @@ def build_single_ui(parent, state, default_font, header_font):
             return
         
         plot_path_analysis(
-            state.stored_secondary_ir, state.stored_noisy_signal, state.stored_signal_after_secondary, state.stored_t, state.stored_fs,
+            state.stored_secondary_ir, state.stored_noisy_signal, state.stored_signal_after_secondary, state.stored_fs,
             title_prefix="Secondary", algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error
+            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error, save_dir=save_dir
         )
 
-    def plot_error():
+    def plot_error(save_dir=None):
         nonlocal mu, L, algorithm, noise_type
 
         plot_error_analysis(
-            state.stored_error_signal, state.stored_t, state.stored_fs, passive_cancelling=state.stored_signal_after_primary,
+            state.stored_after_signal_raw, state.stored_t, state.stored_fs,
+            passive_cancelling=state.stored_before_signal_raw, noisy_signal=state.stored_noisy_signal,
             algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error
+            convergence_time=state.stored_convergence_speed,
+            steady_state_error=state.stored_steady_state_error, save_dir=save_dir
         )
 
-    def plot_signal():
+    def plot_signal(save_dir=None):
         nonlocal mu, L, algorithm, noise_type
 
         plot_signal_flow(
             state.stored_reference_signal, state.stored_noisy_signal, state.stored_error_signal, state.stored_t,
             algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error
+            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error, save_dir=save_dir
         )
     
-    def plot_noise_spec():
+    def plot_noise_spec(save_dir=None):
+        #nonlocal mu, L, algorithm, noise_type
+        
         if state.stored_noisy_signal is None:
             state.status_label.config(text="No noise signal available.", fg="red")
             return
         
-        plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs)
+        plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs, save_dir=save_dir)
     
-    def plot_error_spec():
+    def plot_error_spec(save_dir=None):
+        #nonlocal mu, L, algorithm, noise_type
+        
         if state.stored_error_signal is None:
             state.status_label.config(text="No error signal available.", fg="red")
             return
-        plot_error_spectrogram(state.stored_error_signal, state.stored_fs)
+        plot_error_spectrogram(state.stored_error_signal, state.stored_fs, save_dir=save_dir)
 
-    def plot_band_attn():
+    def plot_band_attn(save_dir=None):
+        nonlocal mu, L, algorithm, noise_type
+        
         if state.stored_signal_after_primary is None or state.stored_error_signal is None:
             state.status_label.config(text="Run a simulation first.", fg="red")
             return
         
         bands_str = state.bands_text.get("1.0", "end-1c").strip()
-        plot_band_attenuation(state.stored_signal_after_primary, state.stored_error_signal, state.stored_fs, bands_str=bands_str)
+        plot_band_attenuation(state.stored_before_signal_raw, state.stored_after_signal_raw,
+                              state.stored_fs, bands_str=bands_str, algorithm_name=algorithm,
+                              mu=mu, L=L, noise_type=noise_type, convergence_time=state.stored_convergence_speed,
+                              steady_state_error=state.stored_steady_state_error, save_dir=save_dir)
+
+    def write_audio(save_dir=None):
+        fs = int(state.stored_fs)
+        # already float32 in [-1, 1]
+        after  = np.asarray(state.play_after,  dtype=np.float32)
+
+        # convert to int16 for WAV
+        after_i16  = (np.clip(after,  -1.0, 1.0) * 32767.0).astype(np.int16)
+
+        #wavfile.write(os.path.join(base, "input_before.wav"), fs, before_i16)
+        wavfile.write(os.path.join(save_dir, "output.wav"), fs, after_i16)
+    
+    def write_metrics(save_dir=None):
+        nonlocal mu, L, algorithm, noise_type
+        meta = dict(algorithm=algorithm, L=L, mu=mu, noise_label=noise_type,
+                    fs=int(state.stored_fs),
+                    exec_time=round(float(state.stored_execution_time or 0.0), 2),
+                    conv_ms=round(float(0.0 if state.stored_convergence_speed is None else state.stored_convergence_speed), 2),
+                    sse_db=round(float(state.stored_steady_state_error), 2),
+                    in_power=round(float(state.stored_in_power or 0.0), 3),
+                    out_power=round(float(state.stored_out_power or 0.0), 3))
+        with open(os.path.join(save_dir, "metrics.json"), "w") as f:
+            json.dump(meta, f, indent=2)
     
     # --- Save Results (single run) ---
     def save_single_results():
@@ -396,59 +431,21 @@ def build_single_ui(parent, state, default_font, header_font):
         jobs = []
 
         # 1) metrics.json
-        def _write_metrics():
-            meta = dict(algorithm=alg, L=L_local, mu=mu_local, noise_label=nlabel,
-                        fs=int(state.stored_fs),
-                        exec_time=round(float(state.stored_execution_time or 0.0), 2),
-                        conv_ms=round(float(0.0 if state.stored_convergence_speed is None else state.stored_convergence_speed), 2),
-                        sse_db=round(float(state.stored_steady_state_error), 2),
-                        in_power=round(float(state.stored_in_power or 0.0), 3),
-                        out_power=round(float(state.stored_out_power or 0.0), 3))
-            with open(os.path.join(base, "metrics.json"), "w") as f:
-                json.dump(meta, f, indent=2)
-        jobs.append(("metrics", _write_metrics))
+        jobs.append(("metrics", lambda: write_metrics(save_dir=base)))
 
-        def _write_audio():
-            fs = int(state.stored_fs)
-            # already float32 in [-1, 1]
-            after  = np.asarray(state.play_after,  dtype=np.float32)
+        # 2) audio WAV
+        jobs.append(("audio_wav", lambda: write_audio(save_dir=base)))
 
-            # convert to int16 for WAV
-            after_i16  = (np.clip(after,  -1.0, 1.0) * 32767.0).astype(np.int16)
-
-            #wavfile.write(os.path.join(base, "input_before.wav"), fs, before_i16)
-            wavfile.write(os.path.join(base, "output.wav"), fs, after_i16)
-        jobs.append(("audio_wav", _write_audio))
-
-        # 2) figures
-        jobs.append(("filter_weights", lambda: plot_filter_weights(state.stored_fs, state.stored_final_weights,
-                            algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
-                            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
-                            save_dir=base)))
-        jobs.append(("primary_path", lambda: plot_path_analysis(state.stored_primary_ir, state.stored_noisy_signal, state.stored_signal_after_primary,
-                            state.stored_t, state.stored_fs, "Primary",
-                            algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
-                            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
-                            save_dir=base)))
+        # 3) figures
+        jobs.append(("filter_weights", lambda: plot_filter(save_dir=base)))
+        jobs.append(("primary_path", lambda: plot_primary_path_effect(save_dir=base)))
         if state.stored_signal_after_secondary is not None:
-            jobs.append(("secondary_path", lambda: plot_path_analysis(state.stored_secondary_ir, state.stored_noisy_signal, state.stored_signal_after_secondary,
-                            state.stored_t, state.stored_fs, "Secondary",
-                            algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
-                            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
-                            save_dir=base)))
-        jobs.append(("error_analysis", lambda: plot_error_analysis(state.stored_after_signal_raw, state.stored_t, state.stored_fs,
-                        passive_cancelling=state.stored_before_signal_raw,
-                        algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-                        convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error)))
-        jobs.append(("signal_flow", lambda: plot_signal_flow(state.stored_reference_signal, state.stored_noisy_signal, state.stored_error_signal,
-                            state.stored_t, algorithm_name=alg, mu=mu_local, L=L_local, noise_type=nlabel,
-                            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error,
-                            save_dir=base)))
-        # optional extras often useful in a single-run dump
-        jobs.append(("band_attenuation", lambda: plot_band_attenuation(state.stored_signal_after_primary, state.stored_error_signal,
-                            state.stored_fs, save_dir=base)))
-        jobs.append(("noise_spectrogram", lambda: plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs, save_dir=base)))
-        jobs.append(("error_spectrogram", lambda: plot_error_spectrogram(state.stored_error_signal, state.stored_fs, save_dir=base)))
+            jobs.append(("secondary_path", lambda: plot_secondary_path_effect(save_dir=base)))
+        jobs.append(("error_analysis", lambda: plot_error(save_dir=base)))
+        jobs.append(("signal_flow", lambda: plot_signal(save_dir=base)))
+        jobs.append(("band_attenuation", lambda: plot_band_attn(save_dir=base)))
+        jobs.append(("noise_spectrogram", lambda: plot_noise_spec(save_dir=base)))
+        jobs.append(("error_spectrogram", lambda: plot_error_spec(save_dir=base)))
 
         total = len(jobs)
         state.status_label.config(text=f"Saving 0/{total}…", fg="black")
@@ -461,7 +458,7 @@ def build_single_ui(parent, state, default_font, header_font):
                 try:
                     fn()
                 except Exception as e:
-                    # keep going; report which artifact failed
+                    # keep going and report which artifact failed
                     msg = f"{name} failed: {e}"
                     state.ui_call(state.status_label.config, text=msg, fg="red")
                 done += 1
@@ -546,10 +543,10 @@ def build_single_ui(parent, state, default_font, header_font):
     tk.Label(parent, text="Steady state error (dB):", font=default_font).grid(row=14, column=0, sticky="e")
     sse_val = tk.Label(parent, text="-", font=default_font); sse_val.grid(row=14, column=1, sticky="w")
 
-    tk.Label(parent, text="In power:", font=default_font).grid(row=15, column=0, sticky="e")
+    tk.Label(parent, text="Power (ANC OFF):", font=default_font).grid(row=15, column=0, sticky="e")
     inpow_val = tk.Label(parent, text="-", font=default_font); inpow_val.grid(row=15, column=1, sticky="w")
 
-    tk.Label(parent, text="Out power:", font=default_font).grid(row=16, column=0, sticky="e")
+    tk.Label(parent, text="Power (ANC ON):", font=default_font).grid(row=16, column=0, sticky="e")
     outpow_val = tk.Label(parent, text="-", font=default_font); outpow_val.grid(row=16, column=1, sticky="w")
 
     play_before_btn = tk.Button(parent, text="Play Input", command=toggle_play_before, state=tk.DISABLED)
