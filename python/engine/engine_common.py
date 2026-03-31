@@ -1,4 +1,4 @@
-from scipy.io import loadmat
+from scipy.io import loadmat, wavfile
 import numpy as np
 #import h5py
 #import mat73
@@ -14,6 +14,8 @@ def load_paths():
         #secondary_path = loadmat("python/secondary_paths/secondary_path_new.mat")['sim_imp'].flatten()[:2000]
         #fs, primary_path = wavfile.read("python/primary_paths/primary_anechoic.wav")
         #_, secondary_path = wavfile.read("python/secondary_paths/secondary_anechoic.wav")
+        #primary_path = loadmat("python/primary_paths/primary_path_gh.mat")["Pz1"].flatten()
+        #secondary_path = loadmat("python/secondary_paths/secondary_path_gh.mat")["S"].flatten()
     except Exception as e:
         print("Open the whole ANC-WITH-NN folder as project.")
         print(f"Error loading impulse responses: {e}")
@@ -28,16 +30,40 @@ def load_paths():
     secondary_path = secondary_path.astype(np.float32)
 
     # Peak normalization (same scale factor applied to both)
-    #_, pp_fft = compute_fft(primary_path, fs)
-    #_, sp_fft = compute_fft(secondary_path, fs)
-    #scale = float(np.max(np.abs(whittaker_eilers_smooth(pp_fft, lmbd=1e5)))) + 1e-12 # Max abs value of primary path
-    #scale = 1
-    #pp_fft /= scale
-    #sp_fft /= scale
-    #primary_path = np.real(np.fft.ifft(pp_fft)).astype(np.float32, copy=False)
-    #secondary_path = np.real(np.fft.ifft(sp_fft)).astype(np.float32, copy=False)
-    #primary_path /= scale
-    #secondary_path /= scale
+    primary_path, secondary_path = scale_paths(primary_path, secondary_path, fs)
 
     # Return fs and normalized paths
     return fs, primary_path, secondary_path
+
+def scale_paths(primary_path, secondary_path, fs):
+    """Scale the primary and secondary paths by the same factor (peak normalization)."""
+
+    from utils.smoothing import whittaker_eilers_smooth
+    from utils.fft_transform import compute_fft
+
+    # Compute scale factor based on the maximum absolute value of the primary path
+    #max_val = np.percentile(np.abs(primary_path), 99.9) + 1e-12  # Add small epsilon to avoid division by zero
+
+    _, primary_path_fft = compute_fft(primary_path, fs)
+    primary_path_fft_smoothed = whittaker_eilers_smooth(primary_path_fft, lmbd=1e5)
+
+    #_, secondary_path_fft = compute_fft(secondary_path, fs)
+    #secondary_path_fft_smoothed = whittaker_eilers_smooth(secondary_path_fft, lmbd=1e5)
+
+    max_val = float(np.max(np.abs(primary_path_fft_smoothed))) + 1e-12
+    #max_val = np.percentile(np.abs(primary_path_fft_smoothed), 99) + 1e-12
+    #max_val = np.percentile(primary_path, 99) + 1e-12
+
+    #primary_path_scaled = np.fft.irfft(primary_path_fft - max_val)
+    #secondary_path_scaled = np.fft.irfft(secondary_path_fft - max_val)
+    
+    # Scale both paths by the same factor
+    max_val = 10 ** (max_val / 20)
+    primary_path_scaled = primary_path / max_val
+    secondary_path_scaled = secondary_path / max_val
+
+    primary_path_scaled = primary_path_scaled.astype(np.float32, copy=False)
+    secondary_path_scaled = secondary_path_scaled.astype(np.float32, copy=False)
+    
+    # Return scaled paths
+    return primary_path_scaled, secondary_path_scaled

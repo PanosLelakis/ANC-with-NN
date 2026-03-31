@@ -2,7 +2,7 @@ import threading
 import numpy as np
 from scipy.signal import spectrogram
 from utils.smoothing import whittaker_eilers_smooth
-from utils.convert_to_db import val_to_db, val_to_dbfs
+from utils.convert_to_db import val_to_db, val_to_dbr
 from utils.fft_transform import compute_fft
 
 def _new_fig(headless: bool, figsize=(9.0, 5.4), dpi=110):
@@ -228,26 +228,32 @@ def plot_path_analysis(path_ir, signal_before, signal_after, fs, title_prefix,
 def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_signal=None,
                  algorithm_name="", mu=None, L=None, noise_type="",
                  convergence_time=None, steady_state_error=None, save_dir=None):
-    
+
+    #ref = np.percentile(np.abs(passive_cancelling), 99) + 1e-12
+    #ref = np.sqrt(np.mean(passive_cancelling ** 2))
+    ref = np.sqrt(np.mean(noisy_signal ** 2))
+    passive_dbr = val_to_dbr(passive_cancelling, ref)
+    error_dbr = val_to_dbr(error_signal, ref)
+
     error_db = val_to_db(error_signal)
-    error_db_smooth = whittaker_eilers_smooth(error_db, lmbd=1e11)
+    error_db_smooth = whittaker_eilers_smooth(error_dbr, lmbd=1e12)
     
     # Use last 20% of samples for the fft
     start_idx = int(0.8 * len(error_signal))
     freqs, error_fft = compute_fft(error_signal[start_idx:], fs)
-    error_fft_s = whittaker_eilers_smooth(error_fft, lmbd=1e6)
+    error_fft_s = whittaker_eilers_smooth(error_fft, lmbd=1e4)
     _, noisy_fft = compute_fft(noisy_signal[start_idx:], fs)
-    noisy_fft_s = whittaker_eilers_smooth(noisy_fft, lmbd=1e5)
+    noisy_fft_s = whittaker_eilers_smooth(noisy_fft, lmbd=1e4)
     
     if passive_cancelling is not None:
         passive_db = val_to_db(passive_cancelling)
-        passive_db_smooth = whittaker_eilers_smooth(passive_db, lmbd=1e11)
+        passive_db_smooth = whittaker_eilers_smooth(passive_dbr, lmbd=1e12)
         
         _, passive_fft = compute_fft(passive_cancelling[start_idx:], fs)
-        passive_fft_s = whittaker_eilers_smooth(passive_fft, lmbd=1e5)
+        passive_fft_s = whittaker_eilers_smooth(passive_fft, lmbd=1e4)
     
         reduction_fft = error_fft_s - passive_fft_s   # 20log10(|E|/|D|)
-        reduction_fft_s = whittaker_eilers_smooth(reduction_fft, lmbd=1e5)
+        reduction_fft_s = whittaker_eilers_smooth(reduction_fft, lmbd=1e4)
 
     passive_fft_s -= noisy_fft_s
     error_fft_s -= noisy_fft_s
@@ -260,7 +266,7 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
         fig1.gca().plot(t, error_db_smooth, label="ANC ON", antialiased=True)
     else:
         fig1.gca().plot(t, error_db_smooth, label="ANC ON", antialiased=True)
-    
+
     annotate_convergence(fig1.gca(), t, error_db_smooth, convergence_time)
     annotate_sse(fig1.gca(), t, steady_state_error)
     beautify_plot(fig1.gca(), "Residual Error (Time Domain)", "Time (sec)", "Amplitude (dB)", 0, 1, -30, 0)
@@ -297,10 +303,10 @@ def plot_signal_flow(reference, noisy, error, t,
                  algorithm_name="", mu=None, L=None, noise_type="",
                  convergence_time=None, steady_state_error=None, save_dir=None):
     
-    ref_max = np.max(np.abs(noisy)) + 1e-12
-    reference_dbfs = val_to_dbfs(reference, ref_max)
-    noisy_dbfs = val_to_dbfs(noisy, ref_max)
-    error_dbfs = val_to_dbfs(error, ref_max)
+    ref = np.percentile(np.abs(noisy), 99.9) + 1e-12
+    reference_dbr = val_to_dbr(reference, ref)
+    noisy_dbr = val_to_dbr(noisy, ref)
+    error_dbr = val_to_dbr(error, ref)
 
     fig1, plt = _new_fig(headless=bool(save_dir))
     axs = fig1.subplots(2, 2)
@@ -317,13 +323,13 @@ def plot_signal_flow(reference, noisy, error, t,
     annotate_convergence(ax01, t, error, convergence_time)
     beautify_plot(ax01, "Noisy vs Error (Time Domain)", "Time (sec)", "Amplitude", 0, 1, -4, 4)
 
-    ax10.plot(t, reference_dbfs, label="Reference", alpha=0.7, antialiased=True)
-    ax10.plot(t, noisy_dbfs, label="Noisy", alpha=0.7, antialiased=True)
+    ax10.plot(t, reference_dbr, label="Reference", alpha=0.7, antialiased=True)
+    ax10.plot(t, noisy_dbr, label="Noisy", alpha=0.7, antialiased=True)
     beautify_plot(ax10, "Reference vs Noisy (Time Domain)", "Time (sec)", "Amplitude (dBFS)", 0, 1, -160, 0)
 
-    ax11.plot(t, noisy_dbfs, label="Noisy", alpha=0.7, antialiased=True)
-    ax11.plot(t, error_dbfs, label="Error", alpha=0.7, antialiased=True)
-    annotate_convergence(ax11, t, error_dbfs, convergence_time)
+    ax11.plot(t, noisy_dbr, label="Noisy", alpha=0.7, antialiased=True)
+    ax11.plot(t, error_dbr, label="Error", alpha=0.7, antialiased=True)
+    annotate_convergence(ax11, t, error_dbr, convergence_time)
     beautify_plot(ax11, "Noisy vs Error (Time Domain)", "Time (sec)", "Amplitude (dBFS)", 0, 1, -20, 0)
 
     if save_dir:
@@ -424,7 +430,7 @@ def plot_hparam_heatmap(ranked, mu_vals, L_vals, save_dir=None):
         save_plot(fig1, save_dir, "param_heatmap.png")
     dispose_fig(fig1, plt, save_dir)
 
-def plot_convtime_vs_mu(ranked_for_combo, save_dir=None, title_suffix="",
+def plot_convtime_vs_mu(ranked_for_combo, save_dir=None,
                         algorithm_name="", noise_type=""):
     """
     For each μ: pick min conv_ms over all L. Plot conv_ms vs μ (log-x).
@@ -450,14 +456,14 @@ def plot_convtime_vs_mu(ranked_for_combo, save_dir=None, title_suffix="",
                     fontsize=10.5, fontweight="bold", y=0.98)
     ax = fig.gca()
     ax.plot(mus, convs, marker="o", linewidth=2.0, markersize=5, label="Best over L")
-    title = "Convergence time vs μ" + (f" — {title_suffix}" if title_suffix else "")
+    title = "Convergence time vs μ"
     beautify_plot(ax, title, "μ", "Convergence time (ms)", 1e-5, 1, 0, 1000, xscale="log")
 
     if save_dir:
         save_plot(fig, save_dir, "convtime_vs_mu.png")
     dispose_fig(fig, plt, save_dir)
 
-def plot_sse_vs_L(ranked_for_combo, save_dir=None, title_suffix="",
+def plot_sse_vs_L(ranked_for_combo, save_dir=None,
                   algorithm_name="", noise_type=""):
     """
     For each L: pick min sse_db over all μ. Plot sse_db vs L (linear-x).
@@ -482,7 +488,7 @@ def plot_sse_vs_L(ranked_for_combo, save_dir=None, title_suffix="",
                     fontsize=10.5, fontweight="bold", y=0.98)
     ax = fig.gca()
     ax.plot(Ls, sses, marker="o", linewidth=2.0, markersize=5, label="Best over μ")
-    title = "Steady-state error vs L" + (f" — {title_suffix}" if title_suffix else "")
+    title = "Steady-state error vs L"
     beautify_plot(ax, title, "L (taps)", "SSE (dB)", 2, 1024, -40, 0)
 
     if save_dir:

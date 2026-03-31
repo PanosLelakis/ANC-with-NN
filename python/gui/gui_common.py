@@ -1,4 +1,5 @@
 import tkinter as tk
+import traceback
 from tkinter import ttk
 import tkinter.font as tkfont
 from gui.gui_single import build_single_ui
@@ -43,8 +44,6 @@ class SharedState:
 
     # Callbacks that multi panel may call
     start_single_run_cb = None  # set by gui_single
-    disable_buttons_cb = None   # set by gui_single
-    enable_buttons_cb = None    # set by gui_single
 
     # Best (mu, L) remembered by multi panel
     best_mu = None
@@ -65,10 +64,7 @@ class SharedState:
     # Links to other widgets
     wav_label_ref = None  # set by gui_single
 
-    # Last multi-run artifacts for plotting
-    #last_ranked = None
-    #last_mu_vals = None
-    #last_L_vals = None
+    last_best_combo = None
 
 def build_and_run():
     import queue
@@ -122,8 +118,9 @@ def build_and_run():
             except Exception:
                 return
             state.ui_queue.put((fn, args, kwargs))
-        except Exception:
-            pass
+        except Exception as e:
+            print("UI callback error:", e)
+            traceback.print_exc()
 
     def _drain_ui_queue():
         # Runs on main Tk thread only
@@ -132,16 +129,18 @@ def build_and_run():
                 fn, args, kwargs = state.ui_queue.get_nowait()
                 try:
                     fn(*args, **kwargs)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print("UI callback error:", e)
+                    traceback.print_exc()
         except queue.Empty:
             pass
         # schedule next drain
         try:
             if root.winfo_exists() and not getattr(state, "is_closing", False):
                 state.ui_drain_after_id = root.after(15, _drain_ui_queue)
-        except Exception:
-            pass
+        except Exception as e:
+            print("UI callback error:", e)
+            traceback.print_exc()
 
     state.ui_call = ui_call
     root.after(15, _drain_ui_queue)
@@ -170,8 +169,9 @@ def build_and_run():
                     prev = w.cget("state")
                     state._locked_widget_states[w] = prev
                     w.configure(state="disabled")
-            except Exception:
-                pass
+            except Exception as e:
+                print("UI callback error:", e)
+                traceback.print_exc()
 
     def unlock_ui():
         if not state.is_locked:
@@ -180,8 +180,9 @@ def build_and_run():
             try:
                 if w.winfo_exists():
                     w.configure(state=prev)
-            except Exception:
-                pass
+            except Exception as e:
+                print("UI callback error:", e)
+                traceback.print_exc()
         state._locked_widget_states = {}
         state.is_locked = False
 
@@ -196,14 +197,16 @@ def build_and_run():
             if getattr(state, "ui_drain_after_id", None) is not None:
                 root.after_cancel(state.ui_drain_after_id)
                 state.ui_drain_after_id = None
-        except Exception:
-            pass
+        except Exception as e:
+            print("UI callback error:", e)
+            traceback.print_exc()
 
         try:
-            from utils.audio_utils import stop_audio
+            from utils.audio import stop_audio
             stop_audio()
-        except Exception:
-            pass
+        except Exception as e:
+            print("UI callback error:", e)
+            traceback.print_exc()
 
         root.destroy()
 

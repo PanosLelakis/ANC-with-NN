@@ -29,7 +29,7 @@ def compute_fft(signal, fs, n_fft=None, scaling=None):
 
     if scaling is not None:
         # Scale by length/2 (the term /2 is because we are
-        # using rfft - only the real parth of the fft)
+        # using rfft - only the real part of the fft)
         mag = mag / (n_fft / 2.0)
 
     freqs = np.fft.rfftfreq(n_fft, 1.0/fs)

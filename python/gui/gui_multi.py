@@ -8,18 +8,10 @@ import math
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from engine.engine_single import run_anc_headless
+from engine.engine_multi import score_results, count_unique_combos
 from utils.logger import log_case, init_log
 from utils.plot import plot_hparam_heatmap, plot_convtime_vs_mu, plot_sse_vs_L
-
-def compute_noise_types(combos):
-    noise_types = set()
-    for (alg, src, nlabel, wfp) in combos:
-        if src == "Stationary":
-            noise_types.add((alg, "Stationary", nlabel))
-        else:
-            # use the label already stored (basename) or derive from path
-            noise_types.add((alg, "WAV", nlabel))
-    return len(noise_types)
+from utils.audio import save_wav
 
 def build_multi_ui(parent, state, default_font, header_font):
     ranked = None
@@ -39,6 +31,12 @@ def build_multi_ui(parent, state, default_font, header_font):
 
     mr_wav_paths = []  # list of selected WAV full paths
 
+    def set_multi_action_buttons(run_best=False, heatmap=False, conv=False, sse=False):
+        run_best_btn.config(state=tk.NORMAL if run_best else tk.DISABLED)
+        show_heatmap_btn.config(state=tk.NORMAL if heatmap else tk.DISABLED)
+        show_conv_btn.config(state=tk.NORMAL if conv else tk.DISABLED)
+        show_sse_btn.config(state=tk.NORMAL if sse else tk.DISABLED)
+        
     # --- WAV selection (multi-file) ---
     def select_wav_files():
         nonlocal mr_wav_paths
@@ -113,57 +111,6 @@ def build_multi_ui(parent, state, default_font, header_font):
         vals = np.linspace(int(L_min), int(L_max), L_steps)
         vals = np.unique(np.round(vals).astype(int))
         return vals
-
-    def score_results(results, duration_s, w_conv=0.5, w_sse=0.5, normalize="dataset",
-                    mu_vals=None, L_vals=None, alpha=0.5, lambda_muL=0.1):
-        if not results:
-            return []
-        conv = np.array([r["conv_ms"] for r in results], dtype=float)
-        sse_db = np.array([r["sse_db"] for r in results], dtype=float)
-        rms_e = np.power(10.0, sse_db / 20.0)
-        duration_ms = 1000.0 * float(duration_s)
-        if normalize == "dataset":
-            finite = np.isfinite(conv)
-            denom = np.max(conv[finite]) if np.any(finite) else duration_ms
-            denom = max(denom, 1e-6)
-            conv_norm = np.clip(conv / denom, 0, 10)
-        else:
-            conv_norm = np.clip(conv / max(duration_ms, 1e-6), 0, 10)
-
-        score_core = w_conv * conv_norm + w_sse * rms_e
-
-        # μ–L preference penalty (lower μ and/or lower L favored as α->1 or α->0)
-        if (mu_vals is not None) and (L_vals is not None) and len(mu_vals) and len(L_vals):
-            mu_min, mu_max = float(np.min(mu_vals)), float(np.max(mu_vals))
-            L_min,  L_max  = float(np.min(L_vals)),  float(np.max(L_vals))
-            span_mu = max(mu_max - mu_min, 1e-12)
-            span_L  = max(L_max  - L_min,  1e-12)
-            mus = np.array([r["mu"] for r in results], dtype=float)
-            Ls  = np.array([r["L"]  for r in results], dtype=float)
-            mu_norm = (mus - mu_min) / span_mu
-            L_norm  = (Ls  - L_min)  / span_L
-            penalty = alpha * mu_norm + (1.0 - alpha) * L_norm
-            scores = score_core + lambda_muL * penalty
-        else:
-            scores = score_core
-
-        ranked_local = []
-        # keep all metadata so we can "Run Best" and save correctly
-        for r, s, cn, re in zip(results, scores, conv_norm, rms_e):
-            item = {
-                "L": int(r["L"]), "mu": float(r["mu"]),
-                "conv_ms": float(r["conv_ms"]), "sse_db": float(r["sse_db"]),
-                "power_anc_off": float(r["in_power"]), "power_anc_on": float(r["out_power"]),
-                "score": float(s), "conv_norm": float(cn), "rms_e": float(re),
-                # metadata
-                "algorithm": r.get("algorithm",""),
-                "source":    r.get("source",""),
-                "noise_label": r.get("noise_label",""),
-                "wav_path":    r.get("wav_path",""),
-            }
-            ranked_local.append(item)
-        ranked_local.sort(key=lambda d: d["score"])
-        return ranked_local
     
     def toggle_source_widgets(*_):
         # WAV picker enabled only if WAV source checked
@@ -195,28 +142,25 @@ def build_multi_ui(parent, state, default_font, header_font):
 
     # ---------- actions ----------
     def show_heatmap():
-        if plot_hparam_heatmap is None:
-            mr_status.config(text="Heatmap plotting not available.", fg="red"); return
-        ranked_loc = state.last_ranked
-        mu_vals_loc = state.last_mu_vals
-        L_vals_loc  = state.last_L_vals
-        if ranked_loc is None or mu_vals_loc is None or L_vals_loc is None:
-            mr_status.config(text="No results to plot yet.", fg="red"); return
+        nonlocal ranked, mu_vals, L_vals
+        if ranked is None or mu_vals is None or L_vals is None:
+            mr_status.config(text="No results to plot yet.", fg="red")
+            return
         try:
-            plot_hparam_heatmap(ranked_loc, mu_vals_loc, L_vals_loc)
+            plot_hparam_heatmap(ranked, mu_vals, L_vals)
         except Exception as e:
             mr_status.config(text=f"Heatmap error: {e}", fg="red")
 
     def show_conv_vs_mu():
-        ranked_loc = state.last_ranked
-        if ranked_loc is None:
+        nonlocal ranked
+        if ranked is None:
             mr_status.config(text="No results to plot yet.", fg="red")
             return
 
         # unique (alg, src, noise)
         combos = []
         seen = set()
-        for r in ranked_loc:
+        for r in ranked:
             k = (r.get("algorithm",""), r.get("source",""), r.get("noise_label",""))
             if k not in seen:
                 seen.add(k)
@@ -224,21 +168,21 @@ def build_multi_ui(parent, state, default_font, header_font):
 
         try:
             for (alg, src, nlabel) in combos:
-                rows = [x for x in ranked_loc if x.get("algorithm")==alg and x.get("source")==src and x.get("noise_label")==nlabel]
-                plot_convtime_vs_mu(rows, save_dir=None, title_suffix=f"{alg} | {nlabel}",
+                rows = [x for x in ranked if x.get("algorithm")==alg and x.get("source")==src and x.get("noise_label")==nlabel]
+                plot_convtime_vs_mu(rows, save_dir=None,
                     algorithm_name=alg, noise_type=nlabel)
         except Exception as e:
             mr_status.config(text=f"Plot error: {e}", fg="red")
 
     def show_sse_vs_L():
-        ranked_loc = state.last_ranked
-        if ranked_loc is None:
+        nonlocal ranked
+        if ranked is None:
             mr_status.config(text="No results to plot yet.", fg="red")
             return
 
         combos = []
         seen = set()
-        for r in ranked_loc:
+        for r in ranked:
             k = (r.get("algorithm",""), r.get("source",""), r.get("noise_label",""))
             if k not in seen:
                 seen.add(k)
@@ -246,8 +190,8 @@ def build_multi_ui(parent, state, default_font, header_font):
 
         try:
             for (alg, src, nlabel) in combos:
-                rows = [x for x in ranked_loc if x.get("algorithm")==alg and x.get("source")==src and x.get("noise_label")==nlabel]
-                plot_sse_vs_L(rows, save_dir=None, title_suffix=f"{alg} | {nlabel}",
+                rows = [x for x in ranked if x.get("algorithm")==alg and x.get("source")==src and x.get("noise_label")==nlabel]
+                plot_sse_vs_L(rows, save_dir=None,
                     algorithm_name=alg, noise_type=nlabel)
         except Exception as e:
             mr_status.config(text=f"Plot error: {e}", fg="red")
@@ -272,14 +216,16 @@ def build_multi_ui(parent, state, default_font, header_font):
             state.noise_source_var.set("Stationary")
             state.noise_var.set(best["noise_label"])
             state.wav_file_path.set("")
+            
             if state.wav_label_ref is not None:
                 state.wav_label_ref.config(text="No file selected")
         else:
             state.noise_source_var.set("WAV")
-            state.noise_var.set("White")  # irrelevant when WAV
+            state.noise_var.set("White")
             state.wav_file_path.set(best.get("wav_path",""))
+            
             if state.wav_label_ref is not None:
-                fname = os.path.basename(best.get("wav_path","")) if best.get("wav_path") else "No file selected"
+                fname = os.path.basename(best.get("wav_path",""))
                 state.wav_label_ref.config(text=fname)
 
         # duration (mirror multi-run)
@@ -337,8 +283,7 @@ def build_multi_ui(parent, state, default_font, header_font):
 
         # UI prep
         start_multi_btn.config(state=tk.DISABLED)
-        run_best_btn.config(state=tk.DISABLED)
-        show_heatmap_btn.config(state=tk.DISABLED)
+        set_multi_action_buttons(False, False, False, False)
         mr_status.config(text=f"Queued {total} simulations…", fg="black")
         mr_progress_var.set(0.0)
         state.lock_ui()
@@ -353,7 +298,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                 for (mu, L) in muL:
                     for (alg, src, nlabel, wfp) in combos:
                         fut = ex.submit(run_anc_headless, alg, int(L), float(mu),
-                                        src, (nlabel if src=="Stationary" else nlabel), wfp, dur)
+                                        src, nlabel, wfp, dur)
                         fut_meta[fut] = {"algorithm": alg, "source": src, "noise_label": nlabel, "wav_path": wfp}
                 for fut in as_completed(fut_meta):
                     meta = fut_meta[fut]
@@ -415,7 +360,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                     fg="green"
                 )
 
-                unique_noise_types = compute_noise_types(combos)
+                unique_noise_types = count_unique_combos(combos)
                 
                 if unique_noise_types == 1:
                     # show best metrics normally
@@ -425,9 +370,6 @@ def build_multi_ui(parent, state, default_font, header_font):
                     best_sse_val.config(text=f"SSE: {best['sse_db']:.2f} dB")
                 
                 start_multi_btn.config(state=tk.NORMAL)
-                #state.last_ranked = ranked
-                #state.last_mu_vals = mu_vals
-                #state.last_L_vals = L_vals
                 mr_exec_label.config(text=f"Execution time (sec): {elapsed:.2f}")
 
                 # Optional saving
@@ -436,21 +378,12 @@ def build_multi_ui(parent, state, default_font, header_font):
                     state.unlock_ui()
                     validate_multi_ready()
                     if unique_noise_types == 1:
-                        run_best_btn.config(state=tk.NORMAL)
-                        show_heatmap_btn.config(state=tk.NORMAL)
-                        show_conv_btn.config(state=tk.NORMAL)
-                        show_sse_btn.config(state=tk.NORMAL)
+                        set_multi_action_buttons(True, True, True, True)
                     else:
-                        run_best_btn.config(state=tk.DISABLED)
-                        show_heatmap_btn.config(state=tk.DISABLED)
-                        show_conv_btn.config(state=tk.DISABLED)
-                        show_sse_btn.config(state=tk.DISABLED)
+                        set_multi_action_buttons(False, False, False, False)
                 else:
                     # remain locked during saving
-                    run_best_btn.config(state=tk.DISABLED)
-                    show_heatmap_btn.config(state=tk.DISABLED)
-                    show_conv_btn.config(state=tk.DISABLED)
-                    show_sse_btn.config(state=tk.DISABLED)
+                    set_multi_action_buttons(False, False, False, False)
                     start_multi_btn.config(state=tk.DISABLED)
                     state.lock_ui()
                     # count "heatmap per combo" + "case saves"
@@ -525,35 +458,15 @@ def build_multi_ui(parent, state, default_font, header_font):
                                     in_power=in_pow, out_power=out_pow,
                                     before_raw=before_raw, after_raw=after_raw
                                 ))
-                            
-                            def _save_wav():
-                                from scipy.io import wavfile
-                                fs = int(payload["fs"])
-                                before = np.asarray(payload["before_raw"], dtype=np.float32)
-                                after = np.asarray(payload["after_raw"], dtype=np.float32)
-                                after = np.nan_to_num(after, nan=0.0, posinf=0.0, neginf=0.0)
-
-                                # scale both with same factor to avoid “fake” improvement due to different scaling
-                                max_abs = max(float(np.max(np.abs(before))), float(np.max(np.abs(after))), 1e-6)
-                                scale = min(1.0, 0.99 / max_abs)
-                                #before = np.clip(before * scale, -1.0, 1.0)
-                                after = np.clip(after * scale, -1.0, 1.0)
-
-                                #before_i16 = (before * 32767.0).astype(np.int16)
-                                after_i16 = (after * 32767.0).astype(np.int16)
-
-                                #wavfile.write(os.path.join(base, "input_before.wav"), fs, before_i16)
-                                wavfile.write(os.path.join(base, "output.wav"), fs, after_i16)
 
                             try:
                                 # run the simulation
-                                run_anc(alg, int(Lx), float(mux), src,
-                                        (nlabel if src=="Stationary" else nlabel),
+                                run_anc(alg, int(Lx), float(mux), src, nlabel,
                                         ("" if src=="Stationary" else wfp),
                                         dur, _dummy_prog, _cb)
                                 
                                 # Save audio output as .wav file
-                                _save_wav()
+                                save_wav(payload["before_raw"], payload["after_raw"], payload["fs"], base)
 
                                 # --- detect divergence here (weights NaN/Inf or gigantic norm)
                                 diverged = False
@@ -584,7 +497,6 @@ def build_multi_ui(parent, state, default_font, header_font):
                                         f.write("Divergence detected (non-finite or huge weights).")
 
                                 # --- save a single spectrogram per noise (if not already there)
-                                #spec_path = os.path.join(base_root, "noise_spectrogram.png")
                                 if not os.path.exists(os.path.join(base_root, "noise_spectrogram.png")):
                                     U.plot_noise_spectrogram(payload["noisy"], payload["fs"], save_dir=base_root)
 
@@ -653,15 +565,9 @@ def build_multi_ui(parent, state, default_font, header_font):
                             mr_progress_var.set(100.0)
                             state.unlock_ui()
                             if unique_noise_types == 1:
-                                run_best_btn.config(state=tk.NORMAL)
-                                show_heatmap_btn.config(state=tk.NORMAL)
-                                show_conv_btn.config(state=tk.NORMAL)
-                                show_sse_btn.config(state=tk.NORMAL)
+                                set_multi_action_buttons(True, True, True, True)
                             else:
-                                run_best_btn.config(state=tk.DISABLED)
-                                show_heatmap_btn.config(state=tk.DISABLED)
-                                show_conv_btn.config(state=tk.DISABLED)
-                                show_sse_btn.config(state=tk.DISABLED)
+                                set_multi_action_buttons(False, False, False, False)
                             validate_multi_ready()  # refresh Start button enable state
                             mr_status.config(text=f"Saved all results to: {os.path.join(os.getcwd(),'results')}", fg="green")
 

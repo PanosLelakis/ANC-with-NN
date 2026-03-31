@@ -10,13 +10,16 @@ class LMS:
     def predict(self, x):
         self.u[1:] = self.u[:-1]  # Shift buffer
         self.u[0] = x  # Insert new input
-        return float(np.dot(self.w, self.u))
+        return np.dot(self.w, self.u)
 
     def adapt(self, error):
         self.w += 2 * self.mu * float(error) * self.u
 
     def estimate(self, x, d):
         y = self.predict(x)
+        if not np.isfinite(y):
+            y = 0.0
+        y = float(y)
         e = d - y  # Compute error
         self.adapt(e)  # Update weights
         return e, y

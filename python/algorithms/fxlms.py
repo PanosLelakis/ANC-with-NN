@@ -12,7 +12,7 @@ class FxLMS:
     def predict(self, x):
         self.u_x[1:] = self.u_x[:-1]
         self.u_x[0] = x
-        return float(np.dot(self.w, self.u_x))
+        return np.dot(self.w, self.u_x)
 
     def adapt(self, error, x_f):
         self.u_xf[1:] = self.u_xf[:-1]

@@ -6,7 +6,7 @@ EXPECTED_FOLDER_NAME = "ANC-with-NN"
 def ensure_correct_cwd(expected_name: str = EXPECTED_FOLDER_NAME) -> Path:
     """
     Require that the current working directory is the project root folder.
-    If not, print an error and exit with non-zero code.
+    If not, print error and exit with whatever code.
     """
     cwd = Path.cwd().resolve()
 

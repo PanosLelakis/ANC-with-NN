@@ -13,8 +13,7 @@ from utils.plot import (
     plot_filter_weights, plot_path_analysis, plot_error_analysis, plot_signal_flow,
     plot_noise_spectrogram, plot_error_spectrogram, plot_band_attenuation
 )
-from utils.audio_utils import play_audio, stop_audio
-from scipy.io import wavfile
+from utils.audio import play_audio, stop_audio, save_wav
 
 def build_single_ui(parent, state, default_font, header_font):
     # local playback state
@@ -30,13 +29,17 @@ def build_single_ui(parent, state, default_font, header_font):
 
     def disable_buttons():
         for b in state.all_buttons:
-            try: b.config(state=tk.DISABLED)
-            except: pass
+            try:
+                b.config(state=tk.DISABLED)
+            except:
+                pass
 
     def enable_buttons():
         for b in state.all_buttons:
-            try: b.config(state=tk.NORMAL)
-            except: pass
+            try:
+                b.config(state=tk.NORMAL)
+            except:
+                pass
 
     def reset_result_labels():
         conv_val.config(text="-")
@@ -46,22 +49,12 @@ def build_single_ui(parent, state, default_font, header_font):
         exec_val.config(text="-")
         state.status_label.config(text="", fg="black")
 
-    def update_progress(pct):
-        try:
-            state.progress_var.set(float(pct))
-            state.progress_bar.update_idletasks()
-        except Exception:
-            pass
-
     def reset_sim_state():
         state.stored_reference_signal = None
         state.stored_noisy_signal = None
         state.stored_signal_after_primary = None
         state.stored_signal_after_secondary = None
         state.stored_error_signal = None
-        state.stored_filtered_signal = None
-        state.stored_error_signal_raw = None
-        state.stored_filtered_signal_raw = None
         state.stored_t = None
         state.stored_initial_weights = None
         state.stored_final_weights = None
@@ -140,15 +133,11 @@ def build_single_ui(parent, state, default_font, header_font):
         before_signal_raw = np.nan_to_num(before_signal_raw, nan=0.0, posinf=0.0, neginf=0.0)
         after_signal_raw  = np.nan_to_num(after_signal_raw,  nan=0.0, posinf=0.0, neginf=0.0)
 
-        try:
-            max_abs = max(float(np.max(np.abs(before_signal_raw))),
-                          float(np.max(np.abs(after_signal_raw))), 1e-6)
-            scale = min(1.0, 0.99 / max_abs)
-            state.play_before = np.clip(before_signal_raw * scale, -1.0, 1.0).astype(np.float32)
-            state.play_after  = np.clip(after_signal_raw  * scale, -1.0, 1.0).astype(np.float32)
-        except Exception:
-            state.play_before = before_signal_raw.astype(np.float32, copy=False)
-            state.play_after  = after_signal_raw.astype(np.float32, copy=False)
+        max_abs = max(float(np.max(np.abs(before_signal_raw))),
+                        float(np.max(np.abs(after_signal_raw))), 1e-6)
+        scale = min(1.0, 0.99 / max_abs)
+        state.play_before = np.clip(before_signal_raw * scale, -1.0, 1.0).astype(np.float32)
+        state.play_after = np.clip(after_signal_raw * scale, -1.0, 1.0).astype(np.float32)
 
         try:
             alg = state.algo_var.get()
@@ -181,8 +170,10 @@ def build_single_ui(parent, state, default_font, header_font):
             state.status_label.config(text=f"Input error: {e}", fg="red"); return
 
         stop_audio()
-        try: plt.close('all')
-        except: pass
+        try:
+            plt.close('all')
+        except:
+            pass
         disable_buttons()
         gc.collect()
         reset_result_labels()
@@ -213,9 +204,12 @@ def build_single_ui(parent, state, default_font, header_font):
 
         threading.Thread(
             target=run_anc,
-            args=(algorithm, L, mu,
-                state.noise_source_var.get(), noise_type, state.wav_file_path.get(),
-                duration, progress_cb, completion_cb),
+            args=(
+                algorithm, L, mu, state.noise_source_var.get(),
+                noise_type, state.wav_file_path.get(),
+                duration, progress_cb, completion_cb
+            ),
+            kwargs={"metrics_callback": None},
             daemon=True
         ).start()
 
@@ -233,12 +227,18 @@ def build_single_ui(parent, state, default_font, header_font):
         ok &= bool(state.algo_var.get())
         # Numeric fields
         for e in (state.L_entry, state.mu_entry, state.duration_entry):
-            if e is None: ok = False; break
+            if e is None:
+                ok = False
+                break
             txt = e.get().strip()
-            if not txt: ok = False; break
+            if not txt:
+                ok = False
+                break
         if ok:
             try:
-                int(state.L_entry.get()); float(state.mu_entry.get()); float(state.duration_entry.get())
+                int(state.L_entry.get())
+                float(state.mu_entry.get())
+                float(state.duration_entry.get())
             except Exception:
                 ok = False
         # WAV path required if WAV chosen
@@ -278,7 +278,6 @@ def build_single_ui(parent, state, default_font, header_font):
             return
         is_playing = True
         play_before_btn.config(text="Stop playing", state=tk.NORMAL)
-        #play_after_btn.config(state=tk.DISABLED)
         state.lock_ui(allow_widgets=(play_before_btn,))
         def _runner():
             play_audio(state.play_before, sample_rate=int(state.stored_fs))
@@ -297,7 +296,6 @@ def build_single_ui(parent, state, default_font, header_font):
             return
         is_playing = True
         play_after_btn.config(text="Stop playing", state=tk.NORMAL)
-        #play_before_btn.config(state=tk.DISABLED)
         state.lock_ui(allow_widgets=(play_after_btn,))
         def _runner():
             play_audio(state.play_after, sample_rate=int(state.stored_fs))
@@ -341,7 +339,7 @@ def build_single_ui(parent, state, default_font, header_font):
         nonlocal mu, L, algorithm, noise_type
 
         plot_error_analysis(
-            state.stored_after_signal_raw, state.stored_t, state.stored_fs,
+            state.stored_error_signal, state.stored_t, state.stored_fs,
             passive_cancelling=state.stored_before_signal_raw, noisy_signal=state.stored_noisy_signal,
             algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
             convergence_time=state.stored_convergence_speed,
@@ -358,7 +356,6 @@ def build_single_ui(parent, state, default_font, header_font):
         )
     
     def plot_noise_spec(save_dir=None):
-        #nonlocal mu, L, algorithm, noise_type
         
         if state.stored_noisy_signal is None:
             state.status_label.config(text="No noise signal available.", fg="red")
@@ -367,11 +364,11 @@ def build_single_ui(parent, state, default_font, header_font):
         plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs, save_dir=save_dir)
     
     def plot_error_spec(save_dir=None):
-        #nonlocal mu, L, algorithm, noise_type
         
         if state.stored_error_signal is None:
             state.status_label.config(text="No error signal available.", fg="red")
             return
+        
         plot_error_spectrogram(state.stored_error_signal, state.stored_fs, save_dir=save_dir)
 
     def plot_band_attn(save_dir=None):
@@ -386,17 +383,6 @@ def build_single_ui(parent, state, default_font, header_font):
                               state.stored_fs, bands_str=bands_str, algorithm_name=algorithm,
                               mu=mu, L=L, noise_type=noise_type, convergence_time=state.stored_convergence_speed,
                               steady_state_error=state.stored_steady_state_error, save_dir=save_dir)
-
-    def write_audio(save_dir=None):
-        fs = int(state.stored_fs)
-        # already float32 in [-1, 1]
-        after  = np.asarray(state.play_after,  dtype=np.float32)
-
-        # convert to int16 for WAV
-        after_i16  = (np.clip(after,  -1.0, 1.0) * 32767.0).astype(np.int16)
-
-        #wavfile.write(os.path.join(base, "input_before.wav"), fs, before_i16)
-        wavfile.write(os.path.join(save_dir, "output.wav"), fs, after_i16)
     
     def write_metrics(save_dir=None):
         nonlocal mu, L, algorithm, noise_type
@@ -434,7 +420,8 @@ def build_single_ui(parent, state, default_font, header_font):
         jobs.append(("metrics", lambda: write_metrics(save_dir=base)))
 
         # 2) audio WAV
-        jobs.append(("audio_wav", lambda: write_audio(save_dir=base)))
+        jobs.append(("audio_wav", lambda: save_wav(state.stored_before_signal_raw, state.stored_after_signal_raw,
+                                                   state.stored_fs, base)))
 
         # 3) figures
         jobs.append(("filter_weights", lambda: plot_filter(save_dir=base)))
@@ -449,7 +436,8 @@ def build_single_ui(parent, state, default_font, header_font):
 
         total = len(jobs)
         state.status_label.config(text=f"Saving 0/{total}…", fg="black")
-        state.disable_buttons_cb()
+        #state.disable_buttons_cb()
+        disable_buttons()
         state.lock_ui()
 
         def _worker():
@@ -458,17 +446,19 @@ def build_single_ui(parent, state, default_font, header_font):
                 try:
                     fn()
                 except Exception as e:
-                    # keep going and report which artifact failed
+                    # If error, report and continue with next job
                     msg = f"{name} failed: {e}"
                     state.ui_call(state.status_label.config, text=msg, fg="red")
                 done += 1
                 state.ui_call(state.status_label.config, text=f"Saving {done}/{total}…", fg="black")
             def _finish():
                 state.unlock_ui()
-                state.enable_buttons_cb()
+                #state.enable_buttons_cb()
+                enable_buttons()
                 state.status_label.config(text=f"Saved to: {base}", fg="green")
             state.ui_call(_finish)
         threading.Thread(target=_worker, daemon=True).start()
+    
     # ---------------- UI ----------------
     # Title
     tk.Label(parent, text="Single Run", font=header_font).grid(row=0, column=0, columnspan=2, sticky="w")
@@ -590,18 +580,15 @@ def build_single_ui(parent, state, default_font, header_font):
     state.bands_text.insert(tk.INSERT, "0-500, 500-1000, 1000-3000, 3000-5000, 5000-10000")
     state.bands_text.grid(row=21, column=1, sticky="ew")
 
-    # Manage as a group if you need global disable/enable
+    # Buttons group for global enabling/disabling
     state.all_buttons.extend([
-        play_before_btn, play_after_btn, save_btn,
-        fw_btn, pp_btn, sp_btn, ea_btn, sf_btn, spec_btn, err_spec_btn, band_btn
+        play_before_btn, play_after_btn, save_btn, fw_btn, pp_btn,
+        sp_btn, ea_btn, sf_btn, spec_btn, err_spec_btn, band_btn
     ])
 
-
-    # expose callbacks to other panels
+    # Expose callback to other panels
     state.start_single_run_cb = start_algorithm
-    state.disable_buttons_cb = disable_buttons
-    state.enable_buttons_cb = enable_buttons
 
-    # initial validation
+    # Initial validation
     parent.after(0, on_noise_source_change)
     parent.after(0, validate_single_ready)
