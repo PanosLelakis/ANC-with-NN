@@ -1,4 +1,4 @@
-from scipy.io import loadmat, wavfile
+from scipy.io import loadmat#, wavfile
 import numpy as np
 #import h5py
 #import mat73
@@ -50,7 +50,7 @@ def scale_paths(primary_path, secondary_path, fs):
     #_, secondary_path_fft = compute_fft(secondary_path, fs)
     #secondary_path_fft_smoothed = whittaker_eilers_smooth(secondary_path_fft, lmbd=1e5)
 
-    max_val = float(np.max(np.abs(primary_path_fft_smoothed))) + 1e-12
+    max_val = float(np.max(primary_path_fft_smoothed)) + 1e-12
     #max_val = np.percentile(np.abs(primary_path_fft_smoothed), 99) + 1e-12
     #max_val = np.percentile(primary_path, 99) + 1e-12
 

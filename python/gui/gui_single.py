@@ -24,9 +24,23 @@ def build_single_ui(parent, state, default_font, header_font):
     algorithm = None
     noise_type = None
     wav_file_path = None
+    play_token = 0
     
     # ---------------- helpers ----------------
 
+    def _poll_playback(token):
+        nonlocal is_playing, play_token
+        if token != play_token:
+            return
+
+        from utils.audio import is_audio_active
+        if is_audio_active():
+            state.root.after(50, _poll_playback, token)
+        else:
+            is_playing = False
+            reset_play_buttons()
+            state.unlock_ui()
+    
     def disable_buttons():
         for b in state.all_buttons:
             try:
@@ -269,39 +283,44 @@ def build_single_ui(parent, state, default_font, header_font):
         play_after_btn.config(state=tk.NORMAL, text="Play Output")
 
     def toggle_play_before():
-        nonlocal is_playing
-        if is_playing and play_before_btn["text"] == "Stop playing":
+        nonlocal is_playing, play_token
+
+        if is_playing:
+            play_token += 1
             stop_audio()
             is_playing = False
             reset_play_buttons()
             state.unlock_ui()
             return
+
         is_playing = True
+        play_token += 1
+        token = play_token
+
         play_before_btn.config(text="Stop playing", state=tk.NORMAL)
         state.lock_ui(allow_widgets=(play_before_btn,))
-        def _runner():
-            play_audio(state.play_before, sample_rate=int(state.stored_fs))
-            state.ui_call(reset_play_buttons)
-            state.ui_call(state.unlock_ui)
-        threading.Thread(target=_runner, daemon=True).start()
+        play_audio(state.play_before, sample_rate=int(state.stored_fs))
+        state.root.after(50, _poll_playback, token)
 
     def toggle_play_after():
-        nonlocal is_playing
-        
-        if is_playing and play_after_btn["text"] == "Stop playing":
+        nonlocal is_playing, play_token
+
+        if is_playing:
+            play_token += 1
             stop_audio()
             is_playing = False
             reset_play_buttons()
             state.unlock_ui()
             return
+
         is_playing = True
+        play_token += 1
+        token = play_token
+
         play_after_btn.config(text="Stop playing", state=tk.NORMAL)
         state.lock_ui(allow_widgets=(play_after_btn,))
-        def _runner():
-            play_audio(state.play_after, sample_rate=int(state.stored_fs))
-            state.ui_call(reset_play_buttons)
-            state.ui_call(state.unlock_ui)
-        threading.Thread(target=_runner, daemon=True).start()
+        play_audio(state.play_after, sample_rate=int(state.stored_fs))
+        state.root.after(50, _poll_playback, token)
     
     def plot_filter(save_dir=None):
         nonlocal mu, L, algorithm, noise_type

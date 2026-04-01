@@ -9,7 +9,7 @@ from algorithms.fxlms import FxLMS
 from algorithms.fxnlms import FxNLMS
 from utils.noise import *
 from utils.performance_metrics import compute_convergence_time, compute_steady_state_error
-from utils.smoothing import whittaker_eilers_smooth
+from utils.smoothing import whittaker_eilers_smooth, moving_rms
 from utils.convert_to_db import val_to_db, val_to_dbr
 #from utils.fft_transform import compute_fft
 import warnings
@@ -74,32 +74,31 @@ def _make_noise(N, fs, noise_source, noise_type, noise_wav_path):
         # Return generated colored noise
         return gens[noise_type](N).astype(np.float32)
 
-def  compute_metrics(start_time, error_signal, fs, N, input):
+def compute_metrics(start_time, error_signal, noisy_signal, fs, N, anc_off_signal):
     # Compute total execution time
     exec_time = time.time() - start_time
 
-    #ref = np.percentile(np.abs(input), 99)
-    ref = np.sqrt(np.mean(input ** 2))
-
     # Convert error signal to dBr
-    error_dbr = val_to_dbr(error_signal, ref)
+    win = max(32, int(0.02 * fs))
+    ref = np.sqrt(np.mean(noisy_signal ** 2) + 1e-12)
+    error_dbr = val_to_dbr(moving_rms(error_signal, win), ref)
 
     # Smooth error signal dB curve
     error_dbr_smoothed = whittaker_eilers_smooth(error_dbr, lmbd=1e12)
 
     # Compute SSE from smoothed error signal
-    sse_db = compute_steady_state_error(error_dbr_smoothed)
+    sse_dbr = compute_steady_state_error(error_dbr_smoothed)
 
     # Compute convergence time from smoothed error signal
-    conv_ms = compute_convergence_time(error_dbr_smoothed, fs, sse_db)
+    conv_ms = compute_convergence_time(error_dbr_smoothed, fs, sse_dbr)
     
     # Compute input/output noise power from the tail of the signals
     tail = slice(int(0.8 * N), N)
-    in_power = compute_noise_power(input[tail])
+    in_power = compute_noise_power(anc_off_signal[tail])
     out_power = compute_noise_power(error_signal[tail])
     
     # Return all metrics
-    return exec_time, conv_ms, sse_db, in_power, out_power
+    return exec_time, conv_ms, sse_dbr, in_power, out_power
 
 def run_anc(algorithm_name, L, mu, noise_source, noise_type,
             noise_wav_path, duration, progress_callback,
@@ -145,15 +144,20 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     primary_output_raw = np.convolve(noisy_signal, primary_path, mode="full")[:N].astype(np.float32, copy=False)
     secondary_output_raw = np.convolve(noisy_signal, secondary_path, mode="full")[:N].astype(np.float32, copy=False)
 
+    anc_off_rms_dbr = 20.0 * np.log10(
+        (np.sqrt(np.mean(primary_output_raw ** 2)) + 1e-12) /
+        (np.sqrt(np.mean(noisy_signal ** 2)) + 1e-12)
+    )
+    print(f"{noise_type} ANC OFF RMS relative to noisy RMS: {anc_off_rms_dbr:.2f} dBr")
+
     # Streams used by adaptive algorithm
-    #scale_factor = np.max(np.abs(primary_output_raw)) + 1e-12
-    primary_stream = primary_output_raw   #/ scale_factor   # d[n]
+    primary_stream = primary_output_raw # d[n]
 
     # LMS/NLMS use the raw noise as y[n]
     if algorithm_name in ("LMS", "NLMS"):
-        secondary_stream = noisy_signal #/ scale_factor   # y[n]
+        secondary_stream = noisy_signal
     else:
-        secondary_stream = secondary_output_raw #/ scale_factor   # y[n]
+        secondary_stream = secondary_output_raw
 
     # Initialize produced signals
     error_signal = np.zeros(N, dtype=np.float32)
@@ -172,37 +176,41 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     for n in range(N):
 
         if algorithm_name in ("FxNLMS", "FxLMS"):
-            # controller output from raw x
+            # Controller output from raw x
             y = algorithm.predict(noisy_signal[n])
             if not np.isfinite(y):
                 y = 0.0
             y = float(y)
 
-            # secondary path acts on controller output to create anti-noise at mic
+            # Secondary path acts on controller output to create anti-noise at mic
             ys, zi = lfilter(secondary_path, [1.0], [y], zi=zi)
 
-            # physical residual at error mic (sign convention)
+            # Physical residual at error mic (sign convention)
             e = primary_output_raw[n] - float(ys[0])
 
-            # update uses filtered-x
+            # Update uses filtered-x
             algorithm.adapt(e, secondary_output_raw[n])
 
+            # Finite guard
+            if not np.isfinite(e):
+                e = 0.0
+            
             en = e
 
         else:
             en, _ = algorithm.estimate(noisy_signal[n], primary_output_raw[n])
         #en = float(np.clip(en, -MAX_ABS, MAX_ABS))
         error_signal[n] = float(en)
-
-        ## Divergence guard: HOLD last value instead of dropping to zero (prevents “vertical drop artifact”)
-        #try:
-            #w = np.asarray(algorithm.w, dtype=float)
-            #if (not np.all(np.isfinite(w))) or (np.linalg.norm(w) > W_NORM_CAP):
-                #error_signal[n+1:] = error_signal[n]
-                #break
-        #except Exception:
-            #pass
-
+        
+        # Divergence guard
+        try:
+            w = np.asarray(algorithm.w, dtype=float)
+            if (not np.all(np.isfinite(w))) or (np.linalg.norm(w) > 1e4):
+                error_signal[n:] = error_signal[n]
+                break
+        except Exception:
+            pass
+        
         if (n % progress_step) == 0:
             try:
                 progress_callback(int((n / N) * 100))
@@ -215,12 +223,12 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     except Exception:
         pass
 
-    #after_signal_raw  = np.clip(scale_factor * error_signal, -1e3, 1e3)
     after_signal_raw = np.clip(error_signal, -1e3, 1e3)
     before_signal_raw = primary_output_raw
 
     # Compute performance metrics
-    exec_time, conv_ms, sse_db, in_power, out_power = compute_metrics(start_time, error_signal, fs, N, before_signal_raw)
+    exec_time, conv_ms, sse_db, in_power, out_power = compute_metrics(
+        start_time, error_signal, noisy_signal, fs, N, before_signal_raw)
 
     if metrics_callback is not None:
         metrics_callback(
@@ -241,12 +249,16 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
 
 def run_anc_headless(algorithm_name, L, mu, noise_source, noise_type,
                      noise_wav_path, duration):
+    # Simulation results dict
     results = {}
 
+    # Dummy progress callback for multi runner
     def _dummy_progress(_pct):
         pass
 
+    # Metrics callback to capture results for multi runner
     def _capture_metrics(*, fs, conv_ms, sse_db, in_power, out_power):
+        # Add simulation metrics to results dict
         results.update({
             "mu": float(mu),
             "L": int(L),
@@ -257,6 +269,7 @@ def run_anc_headless(algorithm_name, L, mu, noise_source, noise_type,
             "fs": int(fs)
         })
 
+    # Run simulation for multi runner
     run_anc(
         algorithm_name, int(L), float(mu), noise_source, noise_type,
         noise_wav_path, float(duration),
@@ -265,12 +278,12 @@ def run_anc_headless(algorithm_name, L, mu, noise_source, noise_type,
         metrics_callback=_capture_metrics
     )
 
+    # Return simulation results dict for multi runner
     return results
-
 
 def simulate_once(algorithm_name, L, mu, noise_source, noise_type,
                     noise_wav_path, duration):
-    """Compatibility wrapper used by multi_sim.py (joblib grid runner)."""
-    
+    """Compatibility wrapper used by engine_multi.py (joblib grid runner)."""
+    # Single simulation run for multi runner
     return run_anc_headless(algorithm_name, L, mu, noise_source,
                                 noise_type, noise_wav_path, duration)

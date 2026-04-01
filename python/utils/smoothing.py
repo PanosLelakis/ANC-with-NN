@@ -1,5 +1,10 @@
 import numpy as np
 
+def moving_rms(x, win):
+    x = np.asarray(x, dtype=float)
+    p = np.convolve(x * x, np.ones(win, dtype=float) / win, mode="same")
+    return np.sqrt(p + 1e-12)
+
 def clamp_odd_window(desired, n):
     """
     Returns an odd window length <= n and >= 3 (or 1 if n<3).
@@ -106,3 +111,30 @@ def whittaker_eilers_smooth(y, lmbd=1e8, order=2, weights=None, x_input=None):
     )
     
     return np.asarray(smoother.smooth(y.tolist()), dtype=float)
+
+def smooth_fractional_oct(signal, freqs, num_fractions):
+    """
+    Smooth a signal by averaging over fractional octave bands.
+
+    Parameters
+    ----------
+    signal : array-like
+        Input signal (1D).
+    num_fractions : int
+        Number of fractional octaves (e.g., 3 for 1/3 octave).
+
+    Returns
+    -------
+    smoothed : np.ndarray
+        Smoothed signal.
+    """
+    from pyfar.dsp import interpolation
+    
+    # Create an interpolation function for the input signal
+    #x = np.arange(len(signal))
+    interp_func = interpolation.smooth_fractional_octave(signal=signal, num_fractions=num_fractions)
+    
+    # Sample the smoothed values at the center frequencies of the fractional octave bands
+    smoothed = interp_func(freqs)
+    
+    return smoothed

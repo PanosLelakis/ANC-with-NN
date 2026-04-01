@@ -514,6 +514,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                                                             "Secondary", alg, mux, Lx, nlabel, payload["conv_ms"], payload["sse_db"], save_dir=base)
                                     U.plot_error_analysis(payload["after_raw"], payload["t"], payload["fs"],
                                                             passive_cancelling=payload["before_raw"],
+                                                            noisy_signal=payload["noisy"],
                                                             algorithm_name=alg, mu=mux, L=Lx, noise_type=nlabel,
                                                             convergence_time=payload["conv_ms"], steady_state_error=payload["sse_db"],
                                                             save_dir=base)

@@ -2,7 +2,7 @@ import threading
 import numpy as np
 from scipy.signal import spectrogram
 from utils.smoothing import whittaker_eilers_smooth
-from utils.convert_to_db import val_to_db, val_to_dbr
+from utils.convert_to_db import val_to_dbr
 from utils.fft_transform import compute_fft
 
 def _new_fig(headless: bool, figsize=(9.0, 5.4), dpi=110):
@@ -75,9 +75,6 @@ def annotate_convergence(ax, t, y, conv_ms):
     
     if (conv_ms is None) or (not np.isfinite(conv_ms)):
         return
-    
-    #t_arr = np.asarray(t, dtype=float)
-    #y_arr = np.asarray(y, dtype=float)
     
     # find nearest index
     idx = int(np.argmin(np.abs(np.asarray(t) - (float(conv_ms) / 1000.0))))
@@ -186,7 +183,7 @@ def plot_filter_weights(fs, w_final, #w_initial,
                       convergence_time, steady_state_error, "Filter Weights")
     fig2.gca().plot(freqs, w_fft, label="FFT of Weights", antialiased=True)
     beautify_plot(fig2.gca(), "Filter Weights (Frequency Domain)", "Frequency (Hz)",
-                  "Magnitude (dB)", 1e-1, 1e4, -20, 10, xscale="log")
+                  "Magnitude (dB)", 1e-1, 1e4, -20, 20, xscale="log")
     if save_dir:
         save_plot(fig2, save_dir, "filter_weights_fft.png")
     dispose_fig(fig2, plt, save_dir)
@@ -208,7 +205,7 @@ def plot_path_analysis(path_ir, signal_before, signal_after, fs, title_prefix,
                       convergence_time, steady_state_error, f"{title_prefix} Path Frequency Domain")
     fig1.gca().plot(freqs_path, path_fft_s, label="Frequency Response (smoothed)", antialiased=True)
     beautify_plot(fig1.gca(), f"{title_prefix} Path Frequency Response", "Frequency (Hz)",
-                  "Magnitude (dB)", 1e-1, 1e4, -10, 20, xscale="log")
+                  "Magnitude (dB)", 1e-1, 1e4, -25, 5, xscale="log")
     if save_dir:
         save_plot(fig1, save_dir, f"{title_prefix.lower()}_path_fft.png")
     dispose_fig(fig1, plt, save_dir)
@@ -217,8 +214,8 @@ def plot_path_analysis(path_ir, signal_before, signal_after, fs, title_prefix,
     fig2, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
     figure_title_metadata(fig2, algorithm_name, mu, L, noise_type,
                       convergence_time, steady_state_error, f"{title_prefix} Path Frequency Domain")
-    fig2.gca().plot(freqs_before, before_s,   label="Input (smoothed)", antialiased=True)
-    fig2.gca().plot(freqs_before,  after_s,    label="After (smoothed)", antialiased=True)
+    fig2.gca().plot(freqs_before, before_s, label="Input (smoothed)", antialiased=True)
+    fig2.gca().plot(freqs_before, after_s, label="After (smoothed)", antialiased=True)
     beautify_plot(fig2.gca(), f"Signal Before & After {title_prefix} Path (FFT)", "Frequency (Hz)",
                   "Magnitude (dB)", 1e-1, 1e4, 20, 60, xscale="log")
     if save_dir:
@@ -232,11 +229,16 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     #ref = np.percentile(np.abs(passive_cancelling), 99) + 1e-12
     #ref = np.sqrt(np.mean(passive_cancelling ** 2))
     ref = np.sqrt(np.mean(noisy_signal ** 2))
-    passive_dbr = val_to_dbr(passive_cancelling, ref)
-    error_dbr = val_to_dbr(error_signal, ref)
+    #passive_dbr = val_to_dbr(passive_cancelling, ref)
+    #error_dbr = val_to_dbr(error_signal, ref)
 
-    error_db = val_to_db(error_signal)
-    error_db_smooth = whittaker_eilers_smooth(error_dbr, lmbd=1e12)
+    from utils.smoothing import moving_rms
+
+    win = max(32, int(0.02 * fs)) # ~20 ms
+    ref = np.sqrt(np.mean(noisy_signal ** 2) + 1e-12)
+    
+    error_dbr = val_to_dbr(moving_rms(error_signal, win), ref)
+    error_dbr_smooth = whittaker_eilers_smooth(error_dbr, lmbd=1e12)
     
     # Use last 20% of samples for the fft
     start_idx = int(0.8 * len(error_signal))
@@ -246,13 +248,13 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     noisy_fft_s = whittaker_eilers_smooth(noisy_fft, lmbd=1e4)
     
     if passive_cancelling is not None:
-        passive_db = val_to_db(passive_cancelling)
-        passive_db_smooth = whittaker_eilers_smooth(passive_dbr, lmbd=1e12)
+        passive_dbr = val_to_dbr(moving_rms(passive_cancelling, win), ref)
+        passive_dbr_smooth = whittaker_eilers_smooth(passive_dbr, lmbd=1e12)
         
         _, passive_fft = compute_fft(passive_cancelling[start_idx:], fs)
         passive_fft_s = whittaker_eilers_smooth(passive_fft, lmbd=1e4)
     
-        reduction_fft = error_fft_s - passive_fft_s   # 20log10(|E|/|D|)
+        reduction_fft = error_fft_s - passive_fft_s # 20log10(|E|/|D|)
         reduction_fft_s = whittaker_eilers_smooth(reduction_fft, lmbd=1e4)
 
     passive_fft_s -= noisy_fft_s
@@ -261,15 +263,14 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     fig1, plt = _new_fig(headless=bool(save_dir), figsize=(13, 8), dpi=120)
     figure_title_metadata(fig1, algorithm_name, mu, L, noise_type,
                       convergence_time, steady_state_error, "Error Signal Analysis")
+    
     if passive_cancelling is not None:
-        fig1.gca().plot(t, passive_db_smooth, label="ANC OFF", antialiased=True)
-        fig1.gca().plot(t, error_db_smooth, label="ANC ON", antialiased=True)
-    else:
-        fig1.gca().plot(t, error_db_smooth, label="ANC ON", antialiased=True)
+        fig1.gca().plot(t, passive_dbr_smooth, label="ANC OFF", antialiased=True)
+    fig1.gca().plot(t, error_dbr_smooth, label="ANC ON", antialiased=True)
 
-    annotate_convergence(fig1.gca(), t, error_db_smooth, convergence_time)
+    annotate_convergence(fig1.gca(), t, error_dbr_smooth, convergence_time)
     annotate_sse(fig1.gca(), t, steady_state_error)
-    beautify_plot(fig1.gca(), "Residual Error (Time Domain)", "Time (sec)", "Amplitude (dB)", 0, 1, -30, 0)
+    beautify_plot(fig1.gca(), "Residual Error (Time Domain)", "Time (sec)", "Amplitude (dBr)", 0, 1, -35, 2)
 
     if save_dir:
         save_plot(fig1, save_dir, "error_time.png")
@@ -279,12 +280,10 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     figure_title_metadata(fig2, algorithm_name, mu, L, noise_type,
                       convergence_time, steady_state_error, "Error Signal Analysis")
     if passive_cancelling is not None:
-        fig2.gca().plot(freqs, passive_fft_s,label="ANC OFF FFT (smoothed)", antialiased=True)
-        fig2.gca().plot(freqs, error_fft_s,  label="ANC ON FFT (smoothed)", antialiased=True)
-    else:
-        fig2.gca().plot(freqs, error_fft_s,  label="ANC ON FFT (smoothed)", antialiased=True)
+        fig2.gca().plot(freqs, passive_fft_s, label="ANC OFF FFT (smoothed)", antialiased=True)
+    fig2.gca().plot(freqs, error_fft_s, label="ANC ON FFT (smoothed)", antialiased=True)
     
-    beautify_plot(fig2.gca(), "Residual Error (Frequency Domain)", "Frequency (Hz)", "Magnitude (dB)", 1e-1, 1e4, -40, 10, xscale="log")
+    beautify_plot(fig2.gca(), "Residual Error (Frequency Domain)", "Frequency (Hz)", "Magnitude (dBr)", 1e-1, 1e4, -40, 10, xscale="log")
     
     if save_dir:
         save_plot(fig2, save_dir, "error_fft.png")

@@ -108,16 +108,10 @@ def build_and_run():
     state.ui_queue = queue.Queue()
 
     def ui_call(fn, *args, **kwargs):
-        # Safe from ANY thread - does not touch Tk
         if getattr(state, "is_closing", False):
             return
         try:
-            try:
-                if not root.winfo_exists():
-                    return
-            except Exception:
-                return
-            state.ui_queue.put((fn, args, kwargs))
+            state.ui_queue.put_nowait((fn, args, kwargs))
         except Exception as e:
             print("UI callback error:", e)
             traceback.print_exc()

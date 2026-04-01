@@ -14,13 +14,16 @@ def play_audio(audio_data, sample_rate=44100):
     if peak > 1.0:
         audio_data = audio_data / peak
 
-    # Serialize start (stop+play) so two threads don't fight
     with _AUDIO_LOCK:
         sd.stop()
-        sd.play(audio_data, samplerate=sample_rate)
+        sd.play(audio_data, samplerate=sample_rate, blocking=False)
 
-    # Do NOT hold the lock during wait, so stop_audio can run
-    sd.wait()
+def is_audio_active():
+    try:
+        s = sd.get_stream()
+        return bool(s is not None and s.active)
+    except Exception:
+        return False
 
 def stop_audio():
     with _AUDIO_LOCK:
