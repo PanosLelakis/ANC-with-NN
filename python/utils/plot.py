@@ -2,7 +2,7 @@ import threading
 import numpy as np
 from scipy.signal import spectrogram
 from utils.smoothing import whittaker_eilers_smooth
-from utils.convert_to_db import val_to_dbr
+from utils.convert_to_db import val_to_dbr, val_to_db
 from utils.fft_transform import compute_fft
 
 def _new_fig(headless: bool, figsize=(9.0, 5.4), dpi=110):
@@ -82,10 +82,10 @@ def annotate_convergence(ax, t, y, conv_ms):
     y = float(y[idx]) if (0 <= idx < len(y)) else 0.0
 
     # Draw vertical line: from x-axis (y=0) to convergence point
-    ax.vlines(x=x, ymin=0.0, ymax=y, linestyle="--", linewidth=1.5, color="k", alpha=0.6)
+    ax.vlines(x=x, ymin=0.0, ymax=y, linestyle=":", linewidth=1.5, color="k", alpha=0.6)
 
     # Draw horizontal line: from y-axis (x=0) to convergence point
-    ax.hlines(y=y, xmin=float(t[0]), xmax=x, linestyle="--", linewidth=1.5, color="k", alpha=0.6)
+    ax.hlines(y=y, xmin=float(t[0]), xmax=x, linestyle=":", linewidth=1.5, color="k", alpha=0.6)
     
     # Draw marker (convergence point)
     ax.plot([x], [y], marker="o", markersize=7, color="k", antialiased=True, label="Convergence time")
@@ -229,8 +229,8 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     #ref = np.percentile(np.abs(passive_cancelling), 99) + 1e-12
     #ref = np.sqrt(np.mean(passive_cancelling ** 2))
     ref = np.sqrt(np.mean(noisy_signal ** 2))
-    #passive_dbr = val_to_dbr(passive_cancelling, ref)
-    #error_dbr = val_to_dbr(error_signal, ref)
+    passive_dbr = val_to_dbr(passive_cancelling, ref)
+    error_dbr = val_to_dbr(error_signal, ref)
 
     from utils.smoothing import moving_rms
 
@@ -238,7 +238,8 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     ref = np.sqrt(np.mean(noisy_signal ** 2) + 1e-12)
     
     error_dbr = val_to_dbr(moving_rms(error_signal, win), ref)
-    error_dbr_smooth = whittaker_eilers_smooth(error_dbr, lmbd=1e12)
+    #error_dbr = val_to_db(error_signal)
+    error_dbr_smooth = whittaker_eilers_smooth(error_dbr, lmbd=1e13)
     
     # Use last 20% of samples for the fft
     start_idx = int(0.8 * len(error_signal))
@@ -249,7 +250,8 @@ def plot_error_analysis(error_signal, t, fs, passive_cancelling=None, noisy_sign
     
     if passive_cancelling is not None:
         passive_dbr = val_to_dbr(moving_rms(passive_cancelling, win), ref)
-        passive_dbr_smooth = whittaker_eilers_smooth(passive_dbr, lmbd=1e12)
+        #passive_dbr = val_to_db(passive_cancelling)
+        passive_dbr_smooth = whittaker_eilers_smooth(passive_dbr, lmbd=1e13)
         
         _, passive_fft = compute_fft(passive_cancelling[start_idx:], fs)
         passive_fft_s = whittaker_eilers_smooth(passive_fft, lmbd=1e4)

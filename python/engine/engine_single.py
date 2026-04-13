@@ -84,7 +84,7 @@ def compute_metrics(start_time, error_signal, noisy_signal, fs, N, anc_off_signa
     error_dbr = val_to_dbr(moving_rms(error_signal, win), ref)
 
     # Smooth error signal dB curve
-    error_dbr_smoothed = whittaker_eilers_smooth(error_dbr, lmbd=1e12)
+    error_dbr_smoothed = whittaker_eilers_smooth(error_dbr, lmbd=1e13)
 
     # Compute SSE from smoothed error signal
     sse_dbr = compute_steady_state_error(error_dbr_smoothed)

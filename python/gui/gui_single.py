@@ -3,7 +3,6 @@ from tkinter import ttk, filedialog
 import threading
 import gc
 import numpy as np
-import matplotlib.pyplot as plt
 import time
 import os
 import json
@@ -95,10 +94,15 @@ def build_single_ui(parent, state, default_font, header_font):
         path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
         
         if path:
-            try: stop_audio()
-            except: pass
-            try: plt.close('all')
-            except: pass
+            try:
+                stop_audio()
+            except:
+                pass
+            try:
+                from matplotlib import pyplot as plt
+                plt.close('all')
+            except:
+                pass
             gc.collect()
             reset_sim_state()
             state.wav_file_path.set(path)
@@ -181,10 +185,12 @@ def build_single_ui(parent, state, default_font, header_font):
             mu = float(state.mu_entry.get())
             duration = float(state.duration_entry.get())
         except Exception as e:
-            state.status_label.config(text=f"Input error: {e}", fg="red"); return
+            state.status_label.config(text=f"Input error: {e}", fg="red")
+            return
 
         stop_audio()
         try:
+            from matplotlib import pyplot as plt
             plt.close('all')
         except:
             pass

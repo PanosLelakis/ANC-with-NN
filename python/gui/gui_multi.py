@@ -405,8 +405,6 @@ def build_multi_ui(parent, state, default_font, header_font):
                     def _save_all_or_best():
                         from engine.engine_single import run_anc # full sim for complete signals
                         from utils import plot as U
-                        #import matplotlib.pyplot as plt
-                        import gc, time
 
                         def _safe_name(s):
                             return "".join(c for c in s if c.isalnum() or c in (" ","-","_")).strip().replace(" ","_")
@@ -542,14 +540,6 @@ def build_multi_ui(parent, state, default_font, header_font):
                                             save_path=base, message=str(e))
                                 except Exception:
                                     pass
-                            finally:
-                                #try:
-                                    #if plt is not None:
-                                        #plt.close('all')
-                                #except Exception:
-                                    #pass
-                                gc.collect()
-                                time.sleep(0.01)
                             bump_save_progress()
                         
                         if mode == "best":
