@@ -1,11 +1,37 @@
 import os
-from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog
 
+from engine.engine_nn import (
+    inspect_dataset_summary,
+    preprocess_dataset,
+    start_training,
+    run_validation,
+)
+
 def build_nn_ui(parent, state, default_font, header_font):
-    # Local helpers
+    # Widget references
+    widgets = {}
+
+    # GUI callbacks
+    callbacks = build_nn_callbacks(state, widgets)
+
+    # Main layout
+    build_nn_title(parent, header_font)
+    build_dataset_frame(parent, state, default_font, callbacks)
+    build_summary_frame(parent, default_font, widgets)
+    build_model_frame(parent, state, default_font)
+    build_training_frame(parent, state, default_font, callbacks)
+    build_validation_frame(parent, state, default_font, widgets, callbacks)
+    build_progress_frame(parent, default_font, widgets)
+    build_status_label(parent, state, default_font, widgets)
+
+    # Initial dataset check
+    parent.after(0, callbacks["inspect_dataset"])
+
+def build_nn_callbacks(state, widgets):
     def select_dataset_root():
+        # Select dataset folder
         path = filedialog.askdirectory(
             initialdir=state.nn_dataset_root_var.get() or "."
         )
@@ -15,6 +41,7 @@ def build_nn_ui(parent, state, default_font, header_font):
             inspect_dataset()
 
     def select_processed_root():
+        # Select processed folder
         path = filedialog.askdirectory(
             initialdir=state.nn_processed_root_var.get() or "."
         )
@@ -23,68 +50,90 @@ def build_nn_ui(parent, state, default_font, header_font):
             state.nn_processed_root_var.set(path)
 
     def select_checkpoint():
+        # Select checkpoint file
         path = filedialog.askopenfilename(
             filetypes=[("PyTorch checkpoints", "*.pt"), ("All files", "*.*")]
         )
 
         if path:
             state.nn_checkpoint_path_var.set(path)
-            checkpoint_label.config(text=os.path.basename(path))
-
-    def get_noise_label(path):
-        # Known noise names
-        name = path.stem.lower()
-
-        if "airport" in name:
-            return "airport"
-        if "street" in name:
-            return "street"
-        if "subway" in name:
-            return "subway"
-
-        return "unknown"
+            widgets["checkpoint_label"].config(text=os.path.basename(path))
 
     def inspect_dataset():
-        root = Path(state.nn_dataset_root_var.get())
-        train_dir = root / "train"
-        validate_dir = root / "validate"
+        # Dataset summary
+        summary = inspect_dataset_summary(state.nn_dataset_root_var.get())
 
-        train_files = sorted(train_dir.glob("*.wav")) if train_dir.exists() else []
-        validate_files = sorted(validate_dir.glob("*.wav")) if validate_dir.exists() else []
+        widgets["train_count_label"].config(text=str(summary["train_count"]))
+        widgets["validate_count_label"].config(text=str(summary["validate_count"]))
 
-        labels = [get_noise_label(p) for p in train_files + validate_files]
-        unique_labels = sorted(set(labels))
+        classes = summary["classes"]
+        widgets["classes_label"].config(
+            text=", ".join(classes) if classes else "-"
+        )
 
-        train_count_label.config(text=str(len(train_files)))
-        validate_count_label.config(text=str(len(validate_files)))
-        classes_label.config(text=", ".join(unique_labels) if unique_labels else "-")
-
-        if train_dir.exists() and validate_dir.exists():
-            nn_status.config(text="Dataset found", fg="green")
+        if summary["dataset_ok"]:
+            widgets["status_label"].config(text="Dataset found", fg="green")
         else:
-            nn_status.config(text="Dataset folders not found", fg="red")
+            widgets["status_label"].config(text="Dataset folders not found", fg="red")
 
-    def preprocess_dataset():
-        # Backend placeholder
-        nn_status.config(text="Preprocessing not connected yet", fg="black")
+    def preprocess_clicked():
+        # Preprocess request
+        result = preprocess_dataset(
+            dataset_root=state.nn_dataset_root_var.get(),
+            processed_root=state.nn_processed_root_var.get(),
+            target_fs=state.nn_target_fs_var.get(),
+            crop_sec=state.nn_crop_sec_var.get(),
+        )
 
-    def start_training():
-        # Backend placeholder
-        nn_status.config(text="Training not connected yet", fg="black")
+        color = "green" if result["ok"] else "black"
+        widgets["status_label"].config(text=result["message"], fg=color)
 
-    def stop_training():
-        # Backend placeholder
-        nn_status.config(text="Stop training not connected yet", fg="black")
+    def start_training_clicked():
+        # Training config
+        config = {
+            "dataset_root": state.nn_dataset_root_var.get(),
+            "processed_root": state.nn_processed_root_var.get(),
+            "target_fs": state.nn_target_fs_var.get(),
+            "crop_sec": state.nn_crop_sec_var.get(),
+            "conv_layers": state.nn_conv_layers_var.get(),
+            "conv_channels": state.nn_conv_channels_var.get(),
+            "lstm_layers": state.nn_lstm_layers_var.get(),
+            "lstm_hidden": state.nn_lstm_hidden_var.get(),
+            "delay_m": state.nn_delay_m_var.get(),
+            "epochs": state.nn_epochs_var.get(),
+            "batch_size": state.nn_batch_size_var.get(),
+            "learning_rate": state.nn_lr_var.get(),
+            "optimizer": state.nn_optimizer_var.get(),
+        }
 
-    def run_validation():
-        # Backend placeholder
-        nn_status.config(text="Validation not connected yet", fg="black")
+        result = start_training(config)
 
-    # Title
+        color = "green" if result["ok"] else "black"
+        widgets["status_label"].config(text=result["message"], fg=color)
+
+    def run_validation_clicked():
+        # Validation request
+        result = run_validation(state.nn_checkpoint_path_var.get())
+
+        color = "green" if result["ok"] else "black"
+        widgets["status_label"].config(text=result["message"], fg=color)
+
+    return {
+        "select_dataset_root": select_dataset_root,
+        "select_processed_root": select_processed_root,
+        "select_checkpoint": select_checkpoint,
+        "inspect_dataset": inspect_dataset,
+        "preprocess_clicked": preprocess_clicked,
+        "start_training_clicked": start_training_clicked,
+        "run_validation_clicked": run_validation_clicked,
+    }
+
+def build_nn_title(parent, header_font):
     tk.Label(parent, text="Neural Network", font=header_font).grid(
         row=0, column=0, columnspan=3, sticky="w"
     )
 
+def build_dataset_frame(parent, state, default_font, callbacks):
     # Dataset frame
     dataset_frame = ttk.LabelFrame(parent, text="Dataset")
     dataset_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
@@ -94,34 +143,32 @@ def build_nn_ui(parent, state, default_font, header_font):
         row=0, column=0, sticky="e"
     )
 
-    dataset_entry = tk.Entry(
+    tk.Entry(
         dataset_frame,
         textvariable=state.nn_dataset_root_var,
         width=55
-    )
-    dataset_entry.grid(row=0, column=1, sticky="ew")
+    ).grid(row=0, column=1, sticky="ew")
 
     tk.Button(
         dataset_frame,
         text="Browse",
-        command=select_dataset_root
+        command=callbacks["select_dataset_root"]
     ).grid(row=0, column=2, sticky="ew")
 
     tk.Label(dataset_frame, text="Processed root:", font=default_font).grid(
         row=1, column=0, sticky="e"
     )
 
-    processed_entry = tk.Entry(
+    tk.Entry(
         dataset_frame,
         textvariable=state.nn_processed_root_var,
         width=55
-    )
-    processed_entry.grid(row=1, column=1, sticky="ew")
+    ).grid(row=1, column=1, sticky="ew")
 
     tk.Button(
         dataset_frame,
         text="Browse",
-        command=select_processed_root
+        command=callbacks["select_processed_root"]
     ).grid(row=1, column=2, sticky="ew")
 
     tk.Label(dataset_frame, text="Target fs:", font=default_font).grid(
@@ -144,26 +191,25 @@ def build_nn_ui(parent, state, default_font, header_font):
         width=10
     ).grid(row=3, column=1, sticky="w")
 
-    tk.Label(dataset_frame, text="Normalization:", font=default_font).grid(
-        row=4, column=0, sticky="e"
-    )
-
-    tk.Label(dataset_frame, text="Unit power", font=default_font).grid(
-        row=4, column=1, sticky="w"
-    )
+    # Dataset buttons
+    button_frame = tk.Frame(dataset_frame)
+    button_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+    button_frame.grid_columnconfigure(0, weight=1)
+    button_frame.grid_columnconfigure(1, weight=1)
 
     tk.Button(
-        dataset_frame,
+        button_frame,
         text="Inspect Dataset",
-        command=inspect_dataset
-    ).grid(row=5, column=0, sticky="ew")
+        command=callbacks["inspect_dataset"]
+    ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
 
     tk.Button(
-        dataset_frame,
+        button_frame,
         text="Preprocess Dataset",
-        command=preprocess_dataset
-    ).grid(row=5, column=1, sticky="ew")
+        command=callbacks["preprocess_clicked"]
+    ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
 
+def build_summary_frame(parent, default_font, widgets):
     # Dataset summary frame
     summary_frame = ttk.LabelFrame(parent, text="Dataset Summary")
     summary_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
@@ -171,21 +217,37 @@ def build_nn_ui(parent, state, default_font, header_font):
     tk.Label(summary_frame, text="Train files:", font=default_font).grid(
         row=0, column=0, sticky="e"
     )
-    train_count_label = tk.Label(summary_frame, text="-", font=default_font)
-    train_count_label.grid(row=0, column=1, sticky="w")
+
+    widgets["train_count_label"] = tk.Label(
+        summary_frame,
+        text="-",
+        font=default_font
+    )
+    widgets["train_count_label"].grid(row=0, column=1, sticky="w", padx=(0, 20))
 
     tk.Label(summary_frame, text="Validation files:", font=default_font).grid(
-        row=1, column=0, sticky="e"
+        row=0, column=2, sticky="e"
     )
-    validate_count_label = tk.Label(summary_frame, text="-", font=default_font)
-    validate_count_label.grid(row=1, column=1, sticky="w")
+
+    widgets["validate_count_label"] = tk.Label(
+        summary_frame,
+        text="-",
+        font=default_font
+    )
+    widgets["validate_count_label"].grid(row=0, column=3, sticky="w", padx=(0, 20))
 
     tk.Label(summary_frame, text="Classes:", font=default_font).grid(
-        row=2, column=0, sticky="e"
+        row=0, column=4, sticky="e"
     )
-    classes_label = tk.Label(summary_frame, text="-", font=default_font)
-    classes_label.grid(row=2, column=1, sticky="w")
 
+    widgets["classes_label"] = tk.Label(
+        summary_frame,
+        text="-",
+        font=default_font
+    )
+    widgets["classes_label"].grid(row=0, column=5, sticky="w")
+
+def build_model_frame(parent, state, default_font):
     # Model frame
     model_frame = ttk.LabelFrame(parent, text="Model")
     model_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
@@ -194,60 +256,61 @@ def build_nn_ui(parent, state, default_font, header_font):
         row=0, column=0, sticky="e"
     )
     tk.Label(model_frame, text="Simplified CRN", font=default_font).grid(
-        row=0, column=1, sticky="w"
+        row=0, column=1, sticky="w", padx=(0, 20)
     )
-
-    tk.Label(model_frame, text="Conv layers:", font=default_font).grid(
-        row=1, column=0, sticky="e"
-    )
-    tk.Label(model_frame, text="2", font=default_font).grid(
-        row=1, column=1, sticky="w"
-    )
-
-    tk.Label(model_frame, text="Conv channels:", font=default_font).grid(
-        row=2, column=0, sticky="e"
-    )
-    tk.Entry(
-        model_frame,
-        textvariable=state.nn_conv_channels_var,
-        width=10
-    ).grid(row=2, column=1, sticky="w")
-
-    tk.Label(model_frame, text="LSTM layers:", font=default_font).grid(
-        row=3, column=0, sticky="e"
-    )
-    tk.Label(model_frame, text="1", font=default_font).grid(
-        row=3, column=1, sticky="w"
-    )
-
-    tk.Label(model_frame, text="LSTM hidden:", font=default_font).grid(
-        row=4, column=0, sticky="e"
-    )
-    tk.Entry(
-        model_frame,
-        textvariable=state.nn_lstm_hidden_var,
-        width=10
-    ).grid(row=4, column=1, sticky="w")
 
     tk.Label(model_frame, text="Delay M:", font=default_font).grid(
-        row=5, column=0, sticky="e"
+        row=0, column=2, sticky="e"
     )
     tk.Entry(
         model_frame,
         textvariable=state.nn_delay_m_var,
         width=10
-    ).grid(row=5, column=1, sticky="w")
+    ).grid(row=0, column=3, sticky="w")
 
-    tk.Label(model_frame, text="Loudspeaker:", font=default_font).grid(
-        row=6, column=0, sticky="e"
+    tk.Label(model_frame, text="Conv layers:", font=default_font).grid(
+        row=1, column=0, sticky="e"
     )
-    tk.Label(model_frame, text="Linear", font=default_font).grid(
-        row=6, column=1, sticky="w"
-    )
+    tk.Entry(
+        model_frame,
+        textvariable=state.nn_conv_layers_var,
+        width=10
+    ).grid(row=1, column=1, sticky="w", padx=(0, 20))
 
+    tk.Label(model_frame, text="Conv channels:", font=default_font).grid(
+        row=1, column=2, sticky="e"
+    )
+    tk.Entry(
+        model_frame,
+        textvariable=state.nn_conv_channels_var,
+        width=10
+    ).grid(row=1, column=3, sticky="w")
+
+    tk.Label(model_frame, text="LSTM layers:", font=default_font).grid(
+        row=2, column=0, sticky="e"
+    )
+    tk.Entry(
+        model_frame,
+        textvariable=state.nn_lstm_layers_var,
+        width=10
+    ).grid(row=2, column=1, sticky="w", padx=(0, 20))
+
+    tk.Label(model_frame, text="LSTM hidden:", font=default_font).grid(
+        row=2, column=2, sticky="e"
+    )
+    tk.Entry(
+        model_frame,
+        textvariable=state.nn_lstm_hidden_var,
+        width=10
+    ).grid(row=2, column=3, sticky="w")
+
+def build_training_frame(parent, state, default_font, callbacks):
     # Training frame
     training_frame = ttk.LabelFrame(parent, text="Training")
     training_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
+
+    training_frame.grid_columnconfigure(1, weight=1)
+    training_frame.grid_columnconfigure(3, weight=1)
 
     tk.Label(training_frame, text="Epochs:", font=default_font).grid(
         row=0, column=0, sticky="e"
@@ -256,46 +319,45 @@ def build_nn_ui(parent, state, default_font, header_font):
         training_frame,
         textvariable=state.nn_epochs_var,
         width=10
-    ).grid(row=0, column=1, sticky="w")
+    ).grid(row=0, column=1, sticky="w", padx=(0, 20))
 
     tk.Label(training_frame, text="Batch size:", font=default_font).grid(
-        row=1, column=0, sticky="e"
+        row=0, column=2, sticky="e"
     )
     tk.Entry(
         training_frame,
         textvariable=state.nn_batch_size_var,
         width=10
-    ).grid(row=1, column=1, sticky="w")
+    ).grid(row=0, column=3, sticky="w")
 
     tk.Label(training_frame, text="Learning rate:", font=default_font).grid(
-        row=2, column=0, sticky="e"
+        row=1, column=0, sticky="e"
     )
     tk.Entry(
         training_frame,
         textvariable=state.nn_lr_var,
         width=10
-    ).grid(row=2, column=1, sticky="w")
+    ).grid(row=1, column=1, sticky="w", padx=(0, 20))
 
     tk.Label(training_frame, text="Optimizer:", font=default_font).grid(
-        row=3, column=0, sticky="e"
+        row=1, column=2, sticky="e"
     )
-    tk.Label(training_frame, text="AMSGrad", font=default_font).grid(
-        row=3, column=1, sticky="w"
-    )
+
+    ttk.Combobox(
+        training_frame,
+        textvariable=state.nn_optimizer_var,
+        values=["AMSGrad", "Adam", "AdamW", "SGD", "RMSprop"],
+        state="readonly",
+        width=10
+    ).grid(row=1, column=3, sticky="w")
 
     tk.Button(
         training_frame,
         text="Start Training",
-        command=start_training
-    ).grid(row=4, column=0, sticky="ew")
+        command=callbacks["start_training_clicked"]
+    ).grid(row=2, column=0, columnspan=4, sticky="ew", pady=(4, 0))
 
-    tk.Button(
-        training_frame,
-        text="Stop Training",
-        command=stop_training,
-        state=tk.DISABLED
-    ).grid(row=4, column=1, sticky="ew")
-
+def build_validation_frame(parent, state, default_font, widgets, callbacks):
     # Validation frame
     validation_frame = ttk.LabelFrame(parent, text="Validation")
     validation_frame.grid(row=5, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
@@ -305,57 +367,72 @@ def build_nn_ui(parent, state, default_font, header_font):
         row=0, column=0, sticky="e"
     )
 
-    checkpoint_label = tk.Label(
+    widgets["checkpoint_label"] = tk.Label(
         validation_frame,
         text="No checkpoint selected",
         font=default_font
     )
-    checkpoint_label.grid(row=0, column=1, sticky="w")
+    widgets["checkpoint_label"].grid(row=0, column=1, sticky="w")
 
     tk.Button(
         validation_frame,
         text="Select",
-        command=select_checkpoint
+        command=callbacks["select_checkpoint"]
     ).grid(row=0, column=2, sticky="ew")
 
     tk.Button(
         validation_frame,
         text="Run Validation",
-        command=run_validation
+        command=callbacks["run_validation_clicked"]
     ).grid(row=1, column=0, columnspan=3, sticky="ew")
 
+def build_progress_frame(parent, default_font, widgets):
     # Progress frame
     progress_frame = ttk.LabelFrame(parent, text="Progress")
     progress_frame.grid(row=6, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
 
-    nn_progress_var = tk.DoubleVar(value=0.0)
+    for col in range(4):
+        progress_frame.grid_columnconfigure(col, weight=1)
 
-    nn_progress = ttk.Progressbar(
+    widgets["progress_var"] = tk.DoubleVar(value=0.0)
+
+    widgets["progress_bar"] = ttk.Progressbar(
         progress_frame,
         maximum=100.0,
-        variable=nn_progress_var
+        variable=widgets["progress_var"]
     )
-    nn_progress.grid(row=0, column=0, columnspan=3, sticky="ew")
+    widgets["progress_bar"].grid(row=0, column=0, columnspan=4, sticky="ew")
 
     tk.Label(progress_frame, text="Training loss:", font=default_font).grid(
         row=1, column=0, sticky="e"
     )
-    tk.Label(progress_frame, text="-", font=default_font).grid(
-        row=1, column=1, sticky="w"
+
+    widgets["training_loss_label"] = tk.Label(
+        progress_frame,
+        text="-",
+        font=default_font
     )
+    widgets["training_loss_label"].grid(row=1, column=1, sticky="w", padx=(0, 20))
 
     tk.Label(progress_frame, text="Validation loss:", font=default_font).grid(
-        row=2, column=0, sticky="e"
-    )
-    tk.Label(progress_frame, text="-", font=default_font).grid(
-        row=2, column=1, sticky="w"
+        row=1, column=2, sticky="e"
     )
 
-    # Status
-    nn_status = tk.Label(parent, text="", font=default_font, anchor="w")
-    nn_status.grid(row=7, column=0, columnspan=3, sticky="ew", padx=5)
+    widgets["validation_loss_label"] = tk.Label(
+        progress_frame,
+        text="-",
+        font=default_font
+    )
+    widgets["validation_loss_label"].grid(row=1, column=3, sticky="w")
 
-    state.nn_status_label = nn_status
+def build_status_label(parent, state, default_font, widgets):
+    # Status label
+    widgets["status_label"] = tk.Label(
+        parent,
+        text="",
+        font=default_font,
+        anchor="w"
+    )
+    widgets["status_label"].grid(row=7, column=0, columnspan=3, sticky="ew", padx=5)
 
-    # Initial inspection
-    parent.after(0, inspect_dataset)
+    state.nn_status_label = widgets["status_label"]

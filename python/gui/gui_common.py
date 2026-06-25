@@ -27,9 +27,12 @@ class SharedState:
     nn_lr_var: tk.StringVar = None
 
     # NN model settings
+    nn_conv_layers_var: tk.StringVar = None
     nn_conv_channels_var: tk.StringVar = None
+    nn_lstm_layers_var: tk.StringVar = None
     nn_lstm_hidden_var: tk.StringVar = None
     nn_delay_m_var: tk.StringVar = None
+    nn_optimizer_var: tk.StringVar = None
 
     # NN status
     nn_status_label = None
@@ -91,12 +94,25 @@ class SharedState:
 def build_and_run():
     import queue
     
-    # Build main program window
+    # Build main window
     root = tk.Tk()
     root.title("ANC with NN — Single & Multi Run")
 
+    # Main fonts
+    default_font = tkfont.Font(size=10)
+    header_font = tkfont.Font(size=12, weight="bold")
+    tab_font = tkfont.Font(size=15, weight="bold")
+
+    # Tab style
+    style = ttk.Style(root)
+    style.configure(
+        "Large.TNotebook.Tab",
+        font=tab_font,
+        padding=(24, 12)
+    )
+
     # Main tabs
-    notebook = ttk.Notebook(root)
+    notebook = ttk.Notebook(root, style="Large.TNotebook")
     notebook.pack(fill="both", expand=True)
 
     # Tab frames
@@ -108,9 +124,6 @@ def build_and_run():
     notebook.add(single_frame, text="Single Run")
     notebook.add(multi_frame, text="Multi Run")
     notebook.add(nn_frame, text="Neural Network")
-
-    default_font = tkfont.Font(size=10)
-    header_font  = tkfont.Font(size=12, weight="bold")
 
     state = SharedState()
     # Set default values
@@ -126,17 +139,20 @@ def build_and_run():
     state.nn_processed_root_var = tk.StringVar(value="python/dataset/processed/dataset_1_16k_40s")
     state.nn_checkpoint_path_var = tk.StringVar(value="")
 
+    # NN model defaults
+    state.nn_conv_layers_var = tk.StringVar(value="2")
+    state.nn_conv_channels_var = tk.StringVar(value="16,32")
+    state.nn_lstm_layers_var = tk.StringVar(value="1")
+    state.nn_lstm_hidden_var = tk.StringVar(value="128")
+    state.nn_delay_m_var = tk.StringVar(value="0")
+
     # NN training defaults
     state.nn_target_fs_var = tk.StringVar(value="16000")
     state.nn_crop_sec_var = tk.StringVar(value="40")
     state.nn_epochs_var = tk.StringVar(value="30")
     state.nn_batch_size_var = tk.StringVar(value="1")
     state.nn_lr_var = tk.StringVar(value="0.001")
-
-    # NN model defaults
-    state.nn_conv_channels_var = tk.StringVar(value="16,32")
-    state.nn_lstm_hidden_var = tk.StringVar(value="128")
-    state.nn_delay_m_var = tk.StringVar(value="0")
+    state.nn_optimizer_var = tk.StringVar(value="AMSGrad")
 
      # Build tab contents
     build_single_ui(single_frame, state, default_font, header_font)
