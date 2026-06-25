@@ -1,6 +1,5 @@
-import numpy as np
-
 def moving_rms(x, win):
+    import numpy as np
     x = np.asarray(x, dtype=float)
     p = np.convolve(x * x, np.ones(win, dtype=float) / win, mode="same")
     return np.sqrt(p + 1e-12)
@@ -33,7 +32,7 @@ def sg_smooth(y, window, order=3):
     w = window
     return savitzky_golay(y, w, order=order)
     
-def savitzky_golay(y, window_size, order, deriv=0, rate=1):
+def savitzky_golay(y, window_size, order):
     """Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
     The Savitzky-Golay filter removes high frequency noise from data.
     It has the advantage of preserving the original shape and
@@ -41,7 +40,6 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     approaches, such as moving averages techniques.
     - window_size: must be odd
     - order: polynomial order
-    - deriv: derivative order (0 = smoothing)
     - rate: sampling rate-like factor (kept for compatibility with your old function)
     """
     import numpy as np
@@ -71,11 +69,8 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
         if window_size < 3:
             return y
 
-    # delta corresponds to sample spacing; keep compatibility with "rate"
-    delta = 1.0 / float(rate) if rate else 1.0
-
-    return savgol_filter(y, window_length=window_size, polyorder=order,
-                         deriv=deriv, delta=delta, mode="interp")
+    return savgol_filter(y, window_length=window_size, polyorder=order)
+                         #mode="mirror")
 
 def whittaker_eilers_smooth(y, lmbd=1e8, order=2, weights=None, x_input=None):
     """
@@ -98,6 +93,7 @@ def whittaker_eilers_smooth(y, lmbd=1e8, order=2, weights=None, x_input=None):
         Smoothed signal.
     """
     from whittaker_eilers import WhittakerSmoother
+    import numpy as np
 
     ws = None if weights is None else np.asarray(weights, dtype=float).tolist()
     xi = None if x_input is None else np.asarray(x_input, dtype=float).tolist()
@@ -112,29 +108,111 @@ def whittaker_eilers_smooth(y, lmbd=1e8, order=2, weights=None, x_input=None):
     
     return np.asarray(smoother.smooth(y.tolist()), dtype=float)
 
-def smooth_fractional_oct(signal, freqs, num_fractions):
+def smooth_fractional_octave_db(freqs, values_db, num_fractions=12,
+                                db_kind="amplitude", window="boxcar",
+                                sampling_rate=None, n_samples=None):
     """
-    Smooth a signal by averaging over fractional octave bands.
+    Fractional-octave smoothing for frequency-domain dB curves using pyfar.
 
-    Parameters
-    ----------
-    signal : array-like
-        Input signal (1D).
+    freqs : array-like
+        Frequency axis in Hz.
+    values_db : array-like
+        Spectrum values in dB.
     num_fractions : int
-        Number of fractional octaves (e.g., 3 for 1/3 octave).
-
-    Returns
-    -------
-    smoothed : np.ndarray
-        Smoothed signal.
+        1  -> 1 octave smoothing
+        3  -> 1/3 octave smoothing
+        6  -> 1/6 octave smoothing
+        12 -> 1/12 octave smoothing
+    db_kind : {"amplitude", "power"}
+        "amplitude": values_db came from 20*log10(...)
+        "power":     values_db came from 10*log10(...)
+    sampling_rate : float or None
+        Needed to construct a pyfar.Signal. If None, estimated from freqs.
+    n_samples : int or None
+        FFT length / original segment length. For Welch spectra, pass nperseg.
     """
-    from pyfar.dsp import interpolation
-    
-    # Create an interpolation function for the input signal
-    #x = np.arange(len(signal))
-    interp_func = interpolation.smooth_fractional_octave(signal=signal, num_fractions=num_fractions)
-    
-    # Sample the smoothed values at the center frequencies of the fractional octave bands
-    smoothed = interp_func(freqs)
-    
-    return smoothed
+    import numpy as np
+    import pyfar as pf
+
+    freqs = np.asarray(freqs, dtype=float)
+    values_db = np.asarray(values_db, dtype=float)
+
+    out = values_db.copy()
+
+    mask = np.isfinite(freqs) & np.isfinite(values_db) & (freqs > 0.0)
+    if np.count_nonzero(mask) < 5:
+        return out
+
+    f = freqs[mask]
+    y_db = values_db[mask]
+
+    # Sort frequencies
+    order = np.argsort(f)
+    f_sorted = f[order]
+    y_sorted = y_db[order]
+
+    # Remove duplicate frequencies
+    f_unique, unique_idx = np.unique(f_sorted, return_index=True)
+    y_unique = y_sorted[unique_idx]
+
+    # Infer sampling rate and FFT length if not provided
+    if sampling_rate is None:
+        sampling_rate = 2.0 * float(np.max(f_unique))
+
+    if n_samples is None:
+        df = float(np.median(np.diff(f_unique)))
+        n_samples = int(round(float(sampling_rate) / df))
+
+    sampling_rate = float(sampling_rate)
+    n_samples = int(n_samples)
+
+    # Create complete rFFT frequency grid expected by pyfar.Signal
+    full_freqs = np.fft.rfftfreq(n_samples, d=1.0 / sampling_rate)
+
+    # Interpolate your dB curve onto the complete FFT grid, including DC
+    y_full_db = np.interp(
+        full_freqs,
+        f_unique,
+        y_unique,
+        left=y_unique[0],
+        right=y_unique[-1]
+    )
+
+    # Convert dB to linear magnitude-like data
+    if db_kind == "power":
+        y_full_lin = 10.0 ** (y_full_db / 10.0)
+        log_factor = 10.0
+    elif db_kind == "amplitude":
+        y_full_lin = 10.0 ** (y_full_db / 20.0)
+        log_factor = 20.0
+    else:
+        raise ValueError("db_kind must be 'amplitude' or 'power'")
+
+    # pyfar.smooth_fractional_octave requires pyfar.Signal, not FrequencyData
+    sig = pf.Signal(
+        y_full_lin.astype(np.complex128),
+        sampling_rate=sampling_rate,
+        n_samples=n_samples,
+        domain="freq",
+        fft_norm="none"
+    )
+
+    sig_smooth, _ = pf.dsp.smooth_fractional_octave(
+        sig,
+        num_fractions=num_fractions,
+        mode="magnitude_zerophase",
+        window=window
+    )
+
+    y_smooth_lin = np.maximum(np.abs(np.asarray(sig_smooth.freq).squeeze()), 1e-24)
+    y_smooth_db_full = log_factor * np.log10(y_smooth_lin)
+
+    # Interpolate back to the original frequency points
+    y_back = np.interp(f, full_freqs, y_smooth_db_full)
+
+    # Undo sorting and write into output
+    y_unsorted = np.empty_like(y_back)
+    y_unsorted[order] = y_back
+
+    out[mask] = y_unsorted
+    return out

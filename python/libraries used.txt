@@ -8,3 +8,4 @@ joblib
 whittaker-eilers
 h5py
 pyfar
+pandas

@@ -75,6 +75,7 @@ def build_single_ui(parent, state, default_font, header_font):
         state.stored_secondary_ir = None
         state.stored_in_power = None
         state.stored_out_power = None
+        state.stored_divergence = False
         reset_result_labels()
 
     def on_noise_source_change():
@@ -116,7 +117,7 @@ def build_single_ui(parent, state, default_font, header_font):
                     initial_weights, final_weights, primary_ir, secondary_ir,
                     signal_after_primary, signal_after_secondary,
                     in_power, out_power,
-                    before_signal_raw, after_signal_raw):
+                    before_signal_raw, after_signal_raw, divergence):
         # store
         state.stored_reference_signal = reference_signal
         state.stored_noisy_signal = noisy_signal
@@ -134,16 +135,23 @@ def build_single_ui(parent, state, default_font, header_font):
         state.stored_execution_time = exec_time
         state.stored_convergence_speed = conv_time
         state.stored_steady_state_error = steady_error_db
+        state.stored_divergence = bool(divergence)
         # raw mic-level (before/after)
         state.stored_before_signal_raw = before_signal_raw
         state.stored_after_signal_raw  = after_signal_raw
 
-        conv_val.config(text=f"{0.0 if conv_time is None else float(conv_time):.2f} ms")
-        sse_val.config(text=f"{float(steady_error_db):.2f} dB")
+        conv_val.config(text="N/A" if conv_time is None else f"{float(conv_time):.2f} ms")
+        if steady_error_db is None or not np.isfinite(float(steady_error_db)):
+            sse_val.config(text="N/A")
+        else:
+            sse_val.config(text=f"{float(steady_error_db):.2f} dBr")
         inpow_val.config(text=f"{float(in_power):.3f}")
         outpow_val.config(text=f"{float(out_power):.3f}")
         exec_val.config(text=f"{float(exec_time):.2f} s")
-        state.status_label.config(text="Done.", fg="green")
+        if state.stored_divergence:
+            state.status_label.config(text="Divergence Detected", fg="red")
+        else:
+            state.status_label.config(text="Done.", fg="green")
         state.progress_var.set(100.0)
         state.progress_bar.update_idletasks()
 
@@ -162,13 +170,14 @@ def build_single_ui(parent, state, default_font, header_font):
             src = state.noise_source_var.get()
             nlabel = (os.path.basename(state.wav_file_path.get()) if src=="WAV" else state.noise_var.get())
             from utils.logger import log_case
-            log_case(stage="single", status="ok",
+            log_case(stage="single", status=("diverged" if state.stored_divergence else "ok"),
                     algorithm=alg, source=src, noise_label=nlabel,
                     L=int(state.L_entry.get()), mu=float(state.mu_entry.get()),
                     conv_ms=state.stored_convergence_speed, sse_db=state.stored_steady_state_error,
                     exec_time=state.stored_execution_time,
                     in_power=state.stored_in_power, out_power=state.stored_out_power,
-                    save_path="", message="")
+                    save_path="", message=("Divergence detected." if state.stored_divergence else ""),
+                    divergence=state.stored_divergence)
         except Exception:
             pass
 
@@ -417,7 +426,9 @@ def build_single_ui(parent, state, default_font, header_font):
                     conv_ms=round(float(0.0 if state.stored_convergence_speed is None else state.stored_convergence_speed), 2),
                     sse_db=round(float(state.stored_steady_state_error), 2),
                     in_power=round(float(state.stored_in_power or 0.0), 3),
-                    out_power=round(float(state.stored_out_power or 0.0), 3))
+                    out_power=round(float(state.stored_out_power or 0.0), 3),
+                    divergence=bool(getattr(state, "stored_divergence", False)),
+                    status=("diverged" if getattr(state, "stored_divergence", False) else "ok"))
         with open(os.path.join(save_dir, "metrics.json"), "w") as f:
             json.dump(meta, f, indent=2)
     
@@ -555,7 +566,7 @@ def build_single_ui(parent, state, default_font, header_font):
     tk.Label(parent, text="Convergence speed (msec):", font=default_font).grid(row=13, column=0, sticky="e")
     conv_val = tk.Label(parent, text="-", font=default_font); conv_val.grid(row=13, column=1, sticky="w")
 
-    tk.Label(parent, text="Steady state error (dB):", font=default_font).grid(row=14, column=0, sticky="e")
+    tk.Label(parent, text="Steady state error (dBr):", font=default_font).grid(row=14, column=0, sticky="e")
     sse_val = tk.Label(parent, text="-", font=default_font); sse_val.grid(row=14, column=1, sticky="w")
 
     tk.Label(parent, text="Power (ANC OFF):", font=default_font).grid(row=15, column=0, sticky="e")

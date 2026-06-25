@@ -4,6 +4,7 @@ import threading
 import time
 
 _LOG_PATH = None
+_RUN_KIND = ""
 _LOCK = threading.Lock()
 
 def init_log(run_kind: str, clear: bool = True, log_dir: str = "."):
@@ -11,7 +12,8 @@ def init_log(run_kind: str, clear: bool = True, log_dir: str = "."):
     Prepare a CSV log. clear=True overwrites any previous file.
     run_kind: "single" or "multi" (free text).
     """
-    global _LOG_PATH
+    global _LOG_PATH, _RUN_KIND
+    _RUN_KIND = str(run_kind or "")
     os.makedirs(log_dir, exist_ok=True)
     _LOG_PATH = os.path.join(log_dir, "anc_run_log.csv")
     if clear or (not os.path.exists(_LOG_PATH)):
@@ -19,7 +21,7 @@ def init_log(run_kind: str, clear: bool = True, log_dir: str = "."):
             f.write("sep=,\n")
             w = csv.writer(f)
             w.writerow([
-                "ts", "run_kind", "stage", "status",
+                "ts", "run_kind", "stage", "status", "divergence",
                 "algorithm", "source", "noise_label",
                 "L", "mu",
                 "conv_ms", "sse_db", "exec_time_s",
@@ -30,7 +32,7 @@ def init_log(run_kind: str, clear: bool = True, log_dir: str = "."):
 
 def log_case(stage, status, algorithm, source, noise_label,
              L, mu, conv_ms, sse_db, exec_time, in_power, out_power,
-             save_path, message, run_kind=None):
+             save_path, message, run_kind=None, divergence=False):
     """
     Append one line. All numeric fields may be None.
     """
@@ -41,10 +43,10 @@ def log_case(stage, status, algorithm, source, noise_label,
 
     row = [
         time.strftime("%Y-%m-%d %H:%M:%S"),
-        (run_kind or ""), stage, status,
+        (run_kind or _RUN_KIND or ""), stage, status, str(bool(divergence)).lower(),
         algorithm, source, noise_label,
         ("" if L is None else int(L)),
-        ("" if mu is None else f"{float(mu):.4f}"),
+        ("" if mu is None else f"{float(mu):.6g}"),
         ("" if conv_ms is None else f"{float(conv_ms):.2f}"),
         ("" if sse_db  is None else f"{float(sse_db):.2f}"),
         ("" if exec_time is None else f"{float(exec_time):.2f}"),

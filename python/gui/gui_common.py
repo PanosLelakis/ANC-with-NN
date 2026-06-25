@@ -4,6 +4,7 @@ from tkinter import ttk
 import tkinter.font as tkfont
 from gui.gui_single import build_single_ui
 from gui.gui_multi import build_multi_ui
+from gui.gui_nn import build_nn_ui
 
 class SharedState:
     """Holds shared Tk variables, references to widgets, and simulation data."""
@@ -12,6 +13,26 @@ class SharedState:
     noise_source_var: tk.StringVar = None
     noise_var: tk.StringVar = None
     wav_file_path: tk.StringVar = None
+
+    # NN dataset settings
+    nn_dataset_root_var: tk.StringVar = None
+    nn_processed_root_var: tk.StringVar = None
+    nn_checkpoint_path_var: tk.StringVar = None
+
+    # NN training settings
+    nn_target_fs_var: tk.StringVar = None
+    nn_crop_sec_var: tk.StringVar = None
+    nn_epochs_var: tk.StringVar = None
+    nn_batch_size_var: tk.StringVar = None
+    nn_lr_var: tk.StringVar = None
+
+    # NN model settings
+    nn_conv_channels_var: tk.StringVar = None
+    nn_lstm_hidden_var: tk.StringVar = None
+    nn_delay_m_var: tk.StringVar = None
+
+    # NN status
+    nn_status_label = None
 
     # Common entries (assigned in gui_single)
     L_entry = None
@@ -60,6 +81,7 @@ class SharedState:
     stored_convergence_speed = None
     stored_steady_state_error = None
     stored_execution_time = None
+    stored_divergence = False
 
     # Links to other widgets
     wav_label_ref = None  # set by gui_single
@@ -73,13 +95,19 @@ def build_and_run():
     root = tk.Tk()
     root.title("ANC with NN — Single & Multi Run")
 
-    paned = ttk.PanedWindow(root, orient="horizontal")
-    paned.pack(fill="both", expand=True)
+    # Main tabs
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill="both", expand=True)
 
-    left_frame  = tk.Frame(paned) # Single run gui
-    right_frame = tk.Frame(paned) # Multi run gui
-    paned.add(left_frame,  weight=1)
-    paned.add(right_frame, weight=1)
+    # Tab frames
+    single_frame = tk.Frame(notebook)
+    multi_frame = tk.Frame(notebook)
+    nn_frame = tk.Frame(notebook)
+
+    # Add tabs
+    notebook.add(single_frame, text="Single Run")
+    notebook.add(multi_frame, text="Multi Run")
+    notebook.add(nn_frame, text="Neural Network")
 
     default_font = tkfont.Font(size=10)
     header_font  = tkfont.Font(size=12, weight="bold")
@@ -93,11 +121,30 @@ def build_and_run():
     state.all_buttons = [] # All buttons list
     state.ui_drain_after_id = None
 
-    # Add single (left) and multi (right) run guis to main window
-    build_single_ui(left_frame, state, default_font, header_font)
-    build_multi_ui(right_frame, state, default_font, header_font)
+    # NN dataset defaults
+    state.nn_dataset_root_var = tk.StringVar(value="python/dataset/dataset_1")
+    state.nn_processed_root_var = tk.StringVar(value="python/dataset/processed/dataset_1_16k_40s")
+    state.nn_checkpoint_path_var = tk.StringVar(value="")
 
-    for f in (left_frame, right_frame):
+    # NN training defaults
+    state.nn_target_fs_var = tk.StringVar(value="16000")
+    state.nn_crop_sec_var = tk.StringVar(value="40")
+    state.nn_epochs_var = tk.StringVar(value="30")
+    state.nn_batch_size_var = tk.StringVar(value="1")
+    state.nn_lr_var = tk.StringVar(value="0.001")
+
+    # NN model defaults
+    state.nn_conv_channels_var = tk.StringVar(value="16,32")
+    state.nn_lstm_hidden_var = tk.StringVar(value="128")
+    state.nn_delay_m_var = tk.StringVar(value="0")
+
+     # Build tab contents
+    build_single_ui(single_frame, state, default_font, header_font)
+    build_multi_ui(multi_frame, state, default_font, header_font)
+    build_nn_ui(nn_frame, state, default_font, header_font)
+
+    # Column layout
+    for f in (single_frame, multi_frame, nn_frame):
         f.grid_columnconfigure(0, weight=0)
         f.grid_columnconfigure(1, weight=1)
 

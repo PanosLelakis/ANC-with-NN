@@ -8,3 +8,12 @@ __pycache__
 progress reports
 report
 results
+.vscode
+BDLib-2
+noise_train_esc50
+noise_train_kaggle
+sample noise dataset by Axon Labs
+PT_DATASET_250314
+plot_noise_colors.py
+plot_path_responses.py
+journal.xlsx

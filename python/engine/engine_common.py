@@ -1,19 +1,19 @@
-from scipy.io import loadmat#, wavfile
-import numpy as np
-#import h5py
-#import mat73
-
-def load_paths():
+def load_paths(target_fs=16000):
     """Load and peak-normalize the primary/secondary impulse responses."""
+    import numpy as np
+    from scipy.io import loadmat, wavfile
+
+    #import h5py
+    #import mat73
     
     fs = 0
     try:
-        primary_path = loadmat("python/primary_paths/primary_path.mat")["sim_imp"].flatten()#[:4000]
-        secondary_path = loadmat("python/secondary_paths/secondary_path.mat")["sim_imp"].flatten()#[:2000]
+        #primary_path = loadmat("python/primary_paths/primary_path.mat")["sim_imp"].flatten()#[:4000]
+        #secondary_path = loadmat("python/secondary_paths/secondary_path.mat")["sim_imp"].flatten()#[:2000]
         #primary_path = h5py.File("python/primary_paths/primary_path_new.mat", "r")['sim_imp'].flatten()[:4000]
         #secondary_path = loadmat("python/secondary_paths/secondary_path_new.mat")['sim_imp'].flatten()[:2000]
-        #fs, primary_path = wavfile.read("python/primary_paths/primary_anechoic.wav")
-        #_, secondary_path = wavfile.read("python/secondary_paths/secondary_anechoic.wav")
+        fs, primary_path = wavfile.read("python/primary_paths/primary_anechoic.wav")
+        _, secondary_path = wavfile.read("python/secondary_paths/secondary_anechoic.wav")
         #primary_path = loadmat("python/primary_paths/primary_path_gh.mat")["Pz1"].flatten()
         #secondary_path = loadmat("python/secondary_paths/secondary_path_gh.mat")["S"].flatten()
     except Exception as e:
@@ -38,29 +38,35 @@ def load_paths():
 def scale_paths(primary_path, secondary_path, fs):
     """Scale the primary and secondary paths by the same factor (peak normalization)."""
 
-    from utils.smoothing import whittaker_eilers_smooth
+    from utils.smoothing import smooth_fractional_octave_db
     from utils.fft_transform import compute_fft
+    import numpy as np
 
-    # Compute scale factor based on the maximum absolute value of the primary path
-    #max_val = np.percentile(np.abs(primary_path), 99.9) + 1e-12  # Add small epsilon to avoid division by zero
+    freqs_primary, primary_path_fft = compute_fft(primary_path, fs)
+    num_fractions = 6  # 1/12-octave smoothing
 
-    _, primary_path_fft = compute_fft(primary_path, fs)
-    primary_path_fft_smoothed = whittaker_eilers_smooth(primary_path_fft, lmbd=1e5)
+    primary_path_fft_smoothed = smooth_fractional_octave_db(
+        freqs_primary,
+        primary_path_fft,
+        num_fractions=num_fractions,
+        db_kind="amplitude",
+        sampling_rate=fs,
+        n_samples=len(primary_path)
+    )
 
-    #_, secondary_path_fft = compute_fft(secondary_path, fs)
-    #secondary_path_fft_smoothed = whittaker_eilers_smooth(secondary_path_fft, lmbd=1e5)
+    # Use only the meaningful frequency range for the peak
+    f_min = 20
+    f_max = 20000
+    mask = (freqs_primary >= f_min) & (freqs_primary <= f_max)
 
-    max_val = float(np.max(primary_path_fft_smoothed)) + 1e-12
-    #max_val = np.percentile(np.abs(primary_path_fft_smoothed), 99) + 1e-12
-    #max_val = np.percentile(primary_path, 99) + 1e-12
-
-    #primary_path_scaled = np.fft.irfft(primary_path_fft - max_val)
-    #secondary_path_scaled = np.fft.irfft(secondary_path_fft - max_val)
+    max_val_db = float(np.max(primary_path_fft_smoothed[mask])) + 1e-12
     
-    # Scale both paths by the same factor
-    max_val = 10 ** (max_val / 20)
-    primary_path_scaled = primary_path / max_val
-    secondary_path_scaled = secondary_path / max_val
+    # Convert dB peak to linear gain
+    max_val_linear = 10 ** (max_val_db / 20)
+
+    # Apply the same scale factor to both paths
+    primary_path_scaled = primary_path / max_val_linear
+    secondary_path_scaled = secondary_path / max_val_linear
 
     primary_path_scaled = primary_path_scaled.astype(np.float32, copy=False)
     secondary_path_scaled = secondary_path_scaled.astype(np.float32, copy=False)

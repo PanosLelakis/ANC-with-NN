@@ -8,14 +8,17 @@ from algorithms.nlms import NLMS
 from algorithms.fxlms import FxLMS
 from algorithms.fxnlms import FxNLMS
 from utils.noise import *
-from utils.performance_metrics import compute_convergence_time, compute_steady_state_error
-from utils.smoothing import whittaker_eilers_smooth, moving_rms
-from utils.convert_to_db import val_to_db, val_to_dbr
-#from utils.fft_transform import compute_fft
+from utils.performance_metrics import (
+    compute_convergence_time,
+    compute_steady_state_error,
+    compute_avg_pnc_dbr,
+    compute_band_attenuation,
+)
+from utils.smoothing import whittaker_eilers_smooth
+from utils.convert_to_db import val_to_dbr
 import warnings
 from scipy.io.wavfile import WavFileWarning
 import faulthandler
-
 # Enable faulthandler for better debugging of crashes
 faulthandler.enable()
 
@@ -79,9 +82,8 @@ def compute_metrics(start_time, error_signal, noisy_signal, fs, N, anc_off_signa
     exec_time = time.time() - start_time
 
     # Convert error signal to dBr
-    win = max(32, int(0.02 * fs))
     ref = np.sqrt(np.mean(noisy_signal ** 2) + 1e-12)
-    error_dbr = val_to_dbr(moving_rms(error_signal, win), ref)
+    error_dbr = val_to_dbr(error_signal, ref)
 
     # Smooth error signal dB curve
     error_dbr_smoothed = whittaker_eilers_smooth(error_dbr, lmbd=1e13)
@@ -144,12 +146,6 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     primary_output_raw = np.convolve(noisy_signal, primary_path, mode="full")[:N].astype(np.float32, copy=False)
     secondary_output_raw = np.convolve(noisy_signal, secondary_path, mode="full")[:N].astype(np.float32, copy=False)
 
-    anc_off_rms_dbr = 20.0 * np.log10(
-        (np.sqrt(np.mean(primary_output_raw ** 2)) + 1e-12) /
-        (np.sqrt(np.mean(noisy_signal ** 2)) + 1e-12)
-    )
-    print(f"{noise_type} ANC OFF RMS relative to noisy RMS: {anc_off_rms_dbr:.2f} dBr")
-
     # Streams used by adaptive algorithm
     primary_stream = primary_output_raw # d[n]
 
@@ -161,16 +157,16 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
 
     # Initialize produced signals
     error_signal = np.zeros(N, dtype=np.float32)
-    #antinoise_signal = np.zeros(N, dtype=np.float32)
 
+    MAX_WEIGHT_NORM = 1e4
+    MAX_INSTANT_PEAK_RATIO = 25.0
+    MAX_TAIL_POWER_RATIO = 10.0
+    MAX_TAIL_PEAK_RATIO = 10.0
+
+    baseline_peak = float(np.max(np.abs(primary_output_raw)) + 1e-12)
+
+    divergence = False
     progress_step = max(1, N // 100)
-    #MAX_ABS = 10.0 # Safety clamp for en/yn to avoid crazy blow-ups
-    #W_NORM_CAP = 1e4 # If ||w|| exceeds this, treat as divergent (garbage)
-
-    # Use a clamp relative to baseline peak (avoid hardcoded 10.0)
-    #baseline_peak = float(np.max(np.abs(primary_output_raw)) + 1e-12)
-    #MAX_ABS = 5.0 * baseline_peak
-
     zi = np.zeros(len(secondary_path) - 1, dtype=np.float64)
 
     for n in range(N):
@@ -199,13 +195,20 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
 
         else:
             en, _ = algorithm.estimate(noisy_signal[n], primary_output_raw[n])
-        #en = float(np.clip(en, -MAX_ABS, MAX_ABS))
+
+        if (not np.isfinite(en)) or (abs(float(en)) > MAX_INSTANT_PEAK_RATIO * baseline_peak):
+            divergence = True
+            en = 0.0 if not np.isfinite(en) else float(en)
+            error_signal[n:] = en
+            break
+
         error_signal[n] = float(en)
         
         # Divergence guard
         try:
             w = np.asarray(algorithm.w, dtype=float)
-            if (not np.all(np.isfinite(w))) or (np.linalg.norm(w) > 1e4):
+            if (not np.all(np.isfinite(w))) or (np.linalg.norm(w) > MAX_WEIGHT_NORM):
+                divergence = True
                 error_signal[n:] = error_signal[n]
                 break
         except Exception:
@@ -229,6 +232,34 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     # Compute performance metrics
     exec_time, conv_ms, sse_db, in_power, out_power = compute_metrics(
         start_time, error_signal, noisy_signal, fs, N, before_signal_raw)
+    
+    # Compute passive noise cancelling level.
+    avg_pnc_dbr = compute_avg_pnc_dbr(before_signal_raw, noisy_signal)
+
+    # Compute band attenuation values.
+    band_attenuation = compute_band_attenuation(before_signal_raw, after_signal_raw, fs)
+
+    tail = slice(int(0.8 * N), N)
+    tail_error_peak = float(np.max(np.abs(error_signal[tail])) + 1e-12)
+    tail_before_peak = float(np.max(np.abs(before_signal_raw[tail])) + 1e-12)
+
+    bad_metrics = (
+        (sse_db is None) or
+        (not np.isfinite(float(sse_db)))
+    )
+
+    bad_tail_power = (
+        np.isfinite(out_power) and
+        np.isfinite(in_power) and
+        out_power > MAX_TAIL_POWER_RATIO * max(float(in_power), 1e-12)
+    )
+
+    bad_tail_peak = (
+        tail_error_peak > MAX_TAIL_PEAK_RATIO * tail_before_peak
+    )
+
+    if bad_metrics or bad_tail_power or bad_tail_peak:
+        divergence = True
 
     if metrics_callback is not None:
         metrics_callback(
@@ -236,7 +267,10 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
             conv_ms=conv_ms,
             sse_db=sse_db,
             in_power=in_power,
-            out_power=out_power
+            out_power=out_power,
+            divergence=divergence,
+            avg_pnc_dbr=avg_pnc_dbr,
+            band_attenuation=band_attenuation
         )
 
     if completion_callback is not None:
@@ -244,7 +278,7 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
             reference_signal, noisy_signal, error_signal, t, fs, exec_time,
             conv_ms, sse_db, init_weights, algorithm.w, primary_path, secondary_path,
             primary_stream, secondary_stream, in_power, out_power,
-            before_signal_raw, after_signal_raw
+            before_signal_raw, after_signal_raw, divergence
         )
 
 def run_anc_headless(algorithm_name, L, mu, noise_source, noise_type,
@@ -257,16 +291,20 @@ def run_anc_headless(algorithm_name, L, mu, noise_source, noise_type,
         pass
 
     # Metrics callback to capture results for multi runner
-    def _capture_metrics(*, fs, conv_ms, sse_db, in_power, out_power):
+    def _capture_metrics(*, fs, conv_ms, sse_db, in_power, out_power, divergence=False,
+                         avg_pnc_dbr=None, band_attenuation=None):
         # Add simulation metrics to results dict
         results.update({
             "mu": float(mu),
             "L": int(L),
-            "conv_ms": 0.0 if conv_ms is None else float(conv_ms),
+            "conv_ms": float(duration) * 1000.0 if conv_ms is None else float(conv_ms),
             "sse_db": float(sse_db),
             "in_power": float(in_power),
             "out_power": float(out_power),
-            "fs": int(fs)
+            "fs": int(fs),
+            "divergence": bool(divergence),
+            "avg_pnc_dbr": None if avg_pnc_dbr is None else float(avg_pnc_dbr),
+            "band_attenuation": {} if band_attenuation is None else band_attenuation
         })
 
     # Run simulation for multi runner
@@ -287,3 +325,50 @@ def simulate_once(algorithm_name, L, mu, noise_source, noise_type,
     # Single simulation run for multi runner
     return run_anc_headless(algorithm_name, L, mu, noise_source,
                                 noise_type, noise_wav_path, duration)
+
+def run_anc_capture(algorithm_name, L, mu, noise_source, noise_type,
+                    noise_wav_path, duration):
+    payload = {}
+
+    def _dummy_progress(_pct):
+        pass
+
+    def _capture(ref, noisy, err, tt, fs, exect, convt, ssedb,
+                 w0, wf, pir, sir, d_stream, z_stream,
+                 in_pow, out_pow, before_raw, after_raw, divergence=False):
+        payload.update(dict(
+            reference=ref,
+            noisy=noisy,
+            error=err,
+            t=tt,
+            fs=fs,
+            exec_time=exect,
+            conv_ms=convt,
+            sse_db=ssedb,
+            w0=w0,
+            wf=wf,
+            pir=pir,
+            sir=sir,
+            d=d_stream,
+            z=z_stream,
+            in_power=in_pow,
+            out_power=out_pow,
+            before_raw=before_raw,
+            after_raw=after_raw,
+            divergence=bool(divergence)
+        ))
+
+    run_anc(
+        algorithm_name,
+        int(L),
+        float(mu),
+        noise_source,
+        noise_type,
+        noise_wav_path,
+        float(duration),
+        _dummy_progress,
+        completion_callback=_capture,
+        metrics_callback=None
+    )
+
+    return payload

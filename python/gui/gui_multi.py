@@ -7,11 +7,14 @@ import time
 import math
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from engine.engine_single import run_anc_headless
-from engine.engine_multi import score_results, count_unique_combos
+from engine.engine_multi import score_results, count_unique_combos, run_multi_case
 from utils.logger import log_case, init_log
 from utils.plot import plot_hparam_heatmap, plot_convtime_vs_mu, plot_sse_vs_L
 from utils.audio import save_wav
+from engine.engine_single import run_anc_capture
+from utils.result_saver import save_case_artifacts, safe_name, append_run_summary
+from utils.export_results import export_thesis_tables
+from utils import plot as U
 
 def build_multi_ui(parent, state, default_font, header_font):
     ranked = None
@@ -240,6 +243,32 @@ def build_multi_ui(parent, state, default_font, header_font):
         if state.start_single_run_cb:
             state.start_single_run_cb()
 
+    def save_combo_summary_plots(ranked_rows, combos, mu_vals, L_vals):
+        seen = set()
+
+        for (alg, src, nlabel, wfp) in combos:
+            key = (alg, src, nlabel)
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            base_root = os.path.join(os.getcwd(), "results", alg, safe_name(nlabel))
+            os.makedirs(base_root, exist_ok=True)
+
+            ranked_for_combo = [
+                r for r in ranked_rows
+                if r.get("algorithm") == alg
+                and r.get("source") == src
+                and r.get("noise_label") == nlabel
+            ]
+
+            if ranked_for_combo:
+                U.plot_hparam_heatmap(ranked_for_combo, mu_vals, L_vals, save_dir=base_root)
+                U.plot_convtime_vs_mu(ranked_for_combo, save_dir=base_root, algorithm_name=alg, noise_type=nlabel)
+                U.plot_sse_vs_L(ranked_for_combo, save_dir=base_root, algorithm_name=alg, noise_type=nlabel)
+
     def start_multi_run():
         nonlocal mu_vals, L_vals, ranked
 
@@ -252,6 +281,7 @@ def build_multi_ui(parent, state, default_font, header_font):
             L_max  = int(L_max_entry.get())
             L_steps  = int(L_steps_entry.get())
             mscale = mu_scale_var.get()
+            mode = save_mode_var.get().lower()
         except Exception as e:
             mr_status.config(text=f"Input error: {e}", fg="red")
             return
@@ -297,9 +327,21 @@ def build_multi_ui(parent, state, default_font, header_font):
                 fut_meta = {}
                 for (mu, L) in muL:
                     for (alg, src, nlabel, wfp) in combos:
-                        fut = ex.submit(run_anc_headless, alg, int(L), float(mu),
-                                        src, nlabel, wfp, dur)
+                        #mode = save_mode_var.get().lower()
+                        fut = ex.submit(
+                            run_multi_case,
+                            alg,
+                            int(L),
+                            float(mu),
+                            src,
+                            nlabel,
+                            wfp,
+                            dur,
+                            mode,
+                            os.path.join(os.getcwd(), "results")
+                        )
                         fut_meta[fut] = {"algorithm": alg, "source": src, "noise_label": nlabel, "wav_path": wfp}
+                
                 for fut in as_completed(fut_meta):
                     meta = fut_meta[fut]
                     try:
@@ -307,7 +349,8 @@ def build_multi_ui(parent, state, default_font, header_font):
                         r.update(meta)
                         results.append(r)
                         # simulation ok (round to GUI style)
-                        log_case(stage="simulate", status="ok",
+                        diverged = bool(r.get("divergence", False))
+                        log_case(stage="simulate", status=("diverged" if diverged else "ok"),
                                 algorithm=meta["algorithm"], source=meta["source"], noise_label=meta["noise_label"],
                                 L=int(r.get("L", 0)), mu=float(r.get("mu", 0.0)),
                                 conv_ms=round(float(r.get("conv_ms", 0.0)), 2),
@@ -315,7 +358,29 @@ def build_multi_ui(parent, state, default_font, header_font):
                                 exec_time=None,
                                 in_power=round(float(r.get("in_power", 0.0)), 3),
                                 out_power=round(float(r.get("out_power", 0.0)), 3),
-                                save_path="", message="")
+                                save_path=r.get("save_path", ""),
+                                message=("Divergence detected." if diverged else ""),
+                                divergence=diverged)
+                        
+                        if mode == "all":
+                            log_case(
+                                stage="save",
+                                status=r.get("status", "diverged" if diverged else "ok"),
+                                algorithm=meta["algorithm"],
+                                source=meta["source"],
+                                noise_label=meta["noise_label"],
+                                L=int(r.get("L", 0)),
+                                mu=float(r.get("mu", 0.0)),
+                                conv_ms=round(float(r.get("conv_ms", 0.0)), 2),
+                                sse_db=round(float(r.get("sse_db", 0.0)), 2),
+                                exec_time=None,
+                                in_power=round(float(r.get("in_power", 0.0)), 3),
+                                out_power=round(float(r.get("out_power", 0.0)), 3),
+                                save_path=r.get("save_path", ""),
+                                message=("Divergence detected." if diverged else ""),
+                                divergence=diverged
+                            )
+                    
                     except Exception as e:
                         # simulation error
                         log_case(stage="simulate", status="error",
@@ -331,9 +396,113 @@ def build_multi_ui(parent, state, default_font, header_font):
                         mr_status.config(text=f"{done}/{total} — {fmt_eta(eta)}")
                     state.ui_call(ui_update)
 
-            ranked_local = score_results(results, duration_s=dur, w_conv=0.5, w_sse=0.5, normalize="dataset",
-                                         mu_vals=mu_vals, L_vals=L_vals,
-                                         alpha=float(alpha_entry.get().strip()), lambda_muL=0.1)
+            ranked_local = score_results(
+                results,
+                duration_s=dur,
+                a=float(alpha_entry.get().strip()),
+                normalize="dataset",
+                mu_vals=mu_vals,
+                L_vals=L_vals,
+                lambda_muL=0.0
+            )
+
+            results_root = os.path.join(os.getcwd(), "results")
+
+            # Recreate run_summary.csv for this multi-run
+            summary_path = os.path.join(results_root, "run_summary.csv")
+            try:
+                if os.path.exists(summary_path):
+                    os.remove(summary_path)
+            except Exception:
+                pass
+
+            for r in ranked_local:
+                in_p = float(r.get("power_anc_off", 0.0))
+                out_p = float(r.get("power_anc_on", 0.0))
+
+                attenuation_db = 10.0 * np.log10((out_p + 1e-12) / (in_p + 1e-12))
+
+                row = dict(r)
+                row["run_kind"] = "multi"
+                row["attenuation_db"] = float(attenuation_db)
+
+                append_run_summary(row, results_root=results_root)
+
+            try:
+                export_thesis_tables(results_root, duration_s=dur)
+            except Exception as e:
+                try:
+                    log_case(
+                        stage="export",
+                        status="error",
+                        algorithm="",
+                        source="",
+                        noise_label="",
+                        L=None,
+                        mu=None,
+                        conv_ms=None,
+                        sse_db=None,
+                        exec_time=None,
+                        in_power=None,
+                        out_power=None,
+                        save_path="",
+                        message=str(e)
+                    )
+                except Exception:
+                    pass
+
+            best_by_combo = {}
+
+            # 1) First pass: keep only non-divergent best results
+            for r in ranked_local:
+                if bool(r.get("divergence", False)):
+                    continue
+
+                key = (
+                    r.get("algorithm", ""),
+                    r.get("source", ""),
+                    r.get("noise_label", "")
+                )
+
+                if key not in best_by_combo:
+                    best_by_combo[key] = r
+
+            # 2) Optional fallback: if a combo has no valid result, keep its best divergent result
+            for r in ranked_local:
+                key = (
+                    r.get("algorithm", ""),
+                    r.get("source", ""),
+                    r.get("noise_label", "")
+                )
+
+                if key not in best_by_combo:
+                    best_by_combo[key] = r
+
+            state.best_by_combo = best_by_combo
+
+            if mode == "all":
+                try:
+                    save_combo_summary_plots(ranked_local, combos, mu_vals, L_vals)
+                except Exception as e:
+                    try:
+                        log_case(
+                            stage="save_summary",
+                            status="error",
+                            algorithm="",
+                            source="",
+                            noise_label="",
+                            L=None,
+                            mu=None,
+                            conv_ms=None,
+                            sse_db=None,
+                            exec_time=None,
+                            in_power=None,
+                            out_power=None,
+                            save_path="",
+                            message=str(e)
+                        )
+                    except Exception:
+                        pass
 
             def ui_done():
                 nonlocal ranked
@@ -356,7 +525,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                 mr_progress_var.set(100.0)
                 mr_status.config(
                     text=(f"Done. Best: L={state.best_L}, μ={state.best_mu:.6g}, "
-                        f"score={best['score']:.3f}, conv={best['conv_ms']:.2f} ms, sse={best['sse_db']:.2f} dB"),
+                        f"score={best['score']:.3f}, conv={best['conv_ms']:.2f} ms, sse={best['sse_db']:.2f} dBr"),
                     fg="green"
                 )
 
@@ -367,204 +536,242 @@ def build_multi_ui(parent, state, default_font, header_font):
                     best_mu_val.config(text=f"μ: {state.best_mu:.6g}")
                     best_L_val.config(text=f"L: {state.best_L:d}")
                     best_conv_val.config(text=f"Convergence speed: {best['conv_ms']:.2f} ms")
-                    best_sse_val.config(text=f"SSE: {best['sse_db']:.2f} dB")
+                    best_sse_val.config(text=f"SSE: {best['sse_db']:.2f} dBr")
                 
                 start_multi_btn.config(state=tk.NORMAL)
                 mr_exec_label.config(text=f"Execution time (sec): {elapsed:.2f}")
 
                 # Optional saving
-                mode = save_mode_var.get().lower()
-                if mode == "none":
+                #mode = save_mode_var.get().lower()
+                
+                if mode in ("none", "all"):
                     state.unlock_ui()
                     validate_multi_ready()
+
                     if unique_noise_types == 1:
                         set_multi_action_buttons(True, True, True, True)
                     else:
                         set_multi_action_buttons(False, False, False, False)
-                else:
-                    # remain locked during saving
+
+                    if mode == "all":
+                        mr_status.config(text=f"Done. Results saved to: {os.path.join(os.getcwd(), 'results')}", fg="green")
+                    else:
+                        mr_status.config(
+                            text=(f"Done. Best: L={state.best_L}, μ={state.best_mu:.6g}, "
+                                f"score={best['score']:.3f}, conv={best['conv_ms']:.2f} ms, sse={best['sse_db']:.2f} dB"),
+                            fg="green"
+                        )
+                
+                elif mode == "best":
+                    best_items = list(getattr(state, "best_by_combo", {}).values())
+
+                    if not best_items:
+                        state.unlock_ui()
+                        validate_multi_ready()
+                        mr_status.config(text="No valid best results to save.", fg="red")
+                        return
+
                     set_multi_action_buttons(False, False, False, False)
                     start_multi_btn.config(state=tk.DISABLED)
                     state.lock_ui()
-                    # count "heatmap per combo" + "case saves"
+
+                    # Unique algorithm/source/noise combos for summary plots
                     unique_combos = []
                     seen = set()
+
                     for (alg, src, nlabel, wfp) in combos:
-                        k = (alg, src, nlabel)
-                        if k not in seen:
-                            seen.add(k)
+                        key = (alg, src, nlabel)
+
+                        if key not in seen:
+                            seen.add(key)
                             unique_combos.append((alg, src, nlabel, wfp))
 
                     heatmap_jobs = len(unique_combos)
-                    case_jobs = 1 if mode == "best" else (len(muL) * len(combos))
+                    case_jobs = len(best_items)
                     total_save_jobs = heatmap_jobs + case_jobs
 
                     mr_progress_var.set(0.0)
                     mr_status.config(text=f"Saving 0/{total_save_jobs}…", fg="black")
-                    
-                    def _save_all_or_best():
-                        from engine.engine_single import run_anc # full sim for complete signals
-                        from utils import plot as U
 
-                        def _safe_name(s):
-                            return "".join(c for c in s if c.isalnum() or c in (" ","-","_")).strip().replace(" ","_")
-
+                    def _save_best_worker():
                         saved = 0
+
                         def bump_save_progress():
                             nonlocal saved
                             saved += 1
                             pct = 100.0 * saved / max(1, total_save_jobs)
                             state.ui_call(mr_progress_var.set, pct)
-                            state.ui_call(mr_status.config, text=f"Saving {saved}/{total_save_jobs}…", fg="black")
+                            state.ui_call(
+                                mr_status.config,
+                                text=f"Saving {saved}/{total_save_jobs}…",
+                                fg="black"
+                            )
 
-                        seen_combo = set()
-                        for (alg, src, nlabel, wfp) in combos:
-                            key = (alg, src, nlabel)
-                            if key in seen_combo: continue
-                            seen_combo.add(key)
-                            base_root = os.path.join(os.getcwd(), "results", alg, _safe_name(nlabel))
-                            os.makedirs(base_root, exist_ok=True)
-                            # Filter 'ranked' to the rows for this combo
-                            ranked_for_combo = [r for r in ranked if r.get("algorithm")==alg and
-                                                                r.get("source")==src and
-                                                                r.get("noise_label")==nlabel]
-                            if ranked_for_combo:
-                                U.plot_hparam_heatmap(ranked_for_combo, mu_vals, L_vals, save_dir=base_root)
-                                U.plot_convtime_vs_mu(ranked_for_combo, save_dir=base_root, algorithm_name=alg, noise_type=nlabel)
-                                U.plot_sse_vs_L(ranked_for_combo, save_dir=base_root, algorithm_name=alg, noise_type=nlabel)
+                        # 1) Save summary plots per combo: heatmap, convergence-vs-mu, sse-vs-L
+                        for (alg, src, nlabel, wfp) in unique_combos:
+                            try:
+                                base_root = os.path.join(os.getcwd(), "results", alg, safe_name(nlabel))
+                                os.makedirs(base_root, exist_ok=True)
+
+                                ranked_for_combo = [
+                                    r for r in ranked
+                                    if r.get("algorithm") == alg
+                                    and r.get("source") == src
+                                    and r.get("noise_label") == nlabel
+                                ]
+
+                                if ranked_for_combo:
+                                    U.plot_hparam_heatmap(
+                                        ranked_for_combo,
+                                        mu_vals,
+                                        L_vals,
+                                        save_dir=base_root
+                                    )
+
+                                    U.plot_convtime_vs_mu(
+                                        ranked_for_combo,
+                                        save_dir=base_root,
+                                        algorithm_name=alg,
+                                        noise_type=nlabel
+                                    )
+
+                                    U.plot_sse_vs_L(
+                                        ranked_for_combo,
+                                        save_dir=base_root,
+                                        algorithm_name=alg,
+                                        noise_type=nlabel
+                                    )
+
+                            except Exception as e:
+                                try:
+                                    log_case(
+                                        stage="save_summary",
+                                        status="error",
+                                        algorithm=alg,
+                                        source=src,
+                                        noise_label=nlabel,
+                                        L=None,
+                                        mu=None,
+                                        conv_ms=None,
+                                        sse_db=None,
+                                        exec_time=None,
+                                        in_power=None,
+                                        out_power=None,
+                                        save_path="",
+                                        message=str(e)
+                                    )
+                                except Exception:
+                                    pass
+
                             bump_save_progress()
-                        
-                        def _run_and_save(alg, src, nlabel, wfp, Lx, mux):
-                            # ---- Create folder up front so every (L,μ) is visible even if we fail later
-                            base_root = os.path.join(os.getcwd(), "results", alg, _safe_name(nlabel))
-                            base = os.path.join(base_root, f"L{int(Lx)}_mu{float(mux):.6g}") if mode == "all" else base_root
-                            os.makedirs(base, exist_ok=True)
 
-                            payload = {}
-                            
-                            def _dummy_prog(_):
-                                pass
-                            
-                            def _cb(ref, noisy, err, tt, fs, exect, convt, ssedb,
-                                    w0, wf, pir, sir, d_stream, z_stream, in_pow, out_pow,
-                                    before_raw, after_raw):
-                                payload.update(dict(
-                                    reference=ref, noisy=noisy, error=err, t=tt, fs=fs,
-                                    exec_time=exect, conv_ms=convt, sse_db=ssedb,
-                                    w0=w0, wf=wf, pir=pir, sir=sir,
-                                    d=d_stream, z=z_stream,
-                                    in_power=in_pow, out_power=out_pow,
-                                    before_raw=before_raw, after_raw=after_raw
-                                ))
+                        # 2) Re-run only the best case of each combo and save full artifacts
+                        for b in best_items:
+                            alg = b.get("algorithm", "")
+                            src = b.get("source", "")
+                            nlabel = b.get("noise_label", "")
+                            wfp = b.get("wav_path", "")
+                            Lx = int(b.get("L"))
+                            mux = float(b.get("mu"))
 
                             try:
-                                # run the simulation
-                                run_anc(alg, int(Lx), float(mux), src, nlabel,
-                                        ("" if src=="Stationary" else wfp),
-                                        dur, _dummy_prog, _cb)
-                                
-                                # Save audio output as .wav file
-                                save_wav(payload["before_raw"], payload["after_raw"], payload["fs"], base)
-
-                                # --- detect divergence here (weights NaN/Inf or gigantic norm)
-                                diverged = False
-                                try:
-                                    wf = np.asarray(payload.get("wf", []), dtype=float)
-                                    if wf.size == 0 or (not np.all(np.isfinite(wf))) or (np.linalg.norm(wf) > 1e4):
-                                        diverged = True
-                                except Exception:
-                                    diverged = True
-
-                                # metrics.json (rounded to GUI style)
-                                meta = dict(
-                                    algorithm=alg, L=int(Lx), mu=float(mux),
-                                    noise_source=src, noise_label=nlabel,
-                                    fs=int(payload["fs"]),
-                                    exec_time=round(float(payload["exec_time"]), 2),
-                                    conv_ms=round(float(0.0 if payload["conv_ms"] is None else payload["conv_ms"]), 2),
-                                    sse_db=round(float(payload["sse_db"]), 2),
-                                    in_power=round(float(payload["in_power"]), 3),
-                                    out_power=round(float(payload["out_power"]), 3),
-                                    status=("diverged" if diverged else "ok"),
+                                payload = run_anc_capture(
+                                    alg,
+                                    Lx,
+                                    mux,
+                                    src,
+                                    nlabel,
+                                    "" if src == "Stationary" else wfp,
+                                    dur
                                 )
-                                with open(os.path.join(base, "metrics.json"), "w") as f:
-                                    json.dump(meta, f, indent=2)
 
-                                if diverged:
-                                    with open(os.path.join(base, "error.txt"), "w") as f:
-                                        f.write("Divergence detected (non-finite or huge weights).")
+                                meta = save_case_artifacts(
+                                    payload=payload,
+                                    alg=alg,
+                                    src=src,
+                                    nlabel=nlabel,
+                                    L=Lx,
+                                    mu=mux,
+                                    base_root=os.path.join(os.getcwd(), "results"),
+                                    save_plots=True,
+                                    save_audio_file=True
+                                )
 
-                                # --- save a single spectrogram per noise (if not already there)
-                                if not os.path.exists(os.path.join(base_root, "noise_spectrogram.png")):
-                                    U.plot_noise_spectrogram(payload["noisy"], payload["fs"], save_dir=base_root)
+                                log_case(
+                                    stage="save",
+                                    status=meta["status"],
+                                    algorithm=alg,
+                                    source=src,
+                                    noise_label=nlabel,
+                                    L=Lx,
+                                    mu=mux,
+                                    conv_ms=meta["conv_ms"],
+                                    sse_db=meta["sse_db"],
+                                    exec_time=meta["exec_time"],
+                                    in_power=meta["in_power"],
+                                    out_power=meta["out_power"],
+                                    save_path=meta["save_path"],
+                                    message=("Divergence detected." if meta["divergence"] else ""),
+                                    divergence=meta["divergence"]
+                                )
 
-                                if not diverged:  # skip heavy plotting if diverged
-                                    U.plot_band_attenuation(payload["before_raw"], payload["after_raw"], payload["fs"],
-                                                            save_dir=base, algorithm_name=alg, mu=mux, L=Lx, noise_type=nlabel,
-                                                            convergence_time=payload.get("conv_ms"), steady_state_error=payload.get("sse_db"))
-                                    U.plot_error_spectrogram(payload["error"], payload["fs"], save_dir=base)
-                                    U.plot_filter_weights(payload["fs"], payload["wf"], alg, mux, Lx, nlabel,
-                                                        payload["conv_ms"], payload["sse_db"], save_dir=base)
-                                    U.plot_path_analysis(payload["pir"], payload["noisy"], payload["d"], payload["fs"],
-                                                        "Primary", alg, mux, Lx, nlabel, payload["conv_ms"], payload["sse_db"], save_dir=base)
-                                    if payload["z"] is not None:
-                                        U.plot_path_analysis(payload["sir"], payload["noisy"], payload["z"], payload["fs"],
-                                                            "Secondary", alg, mux, Lx, nlabel, payload["conv_ms"], payload["sse_db"], save_dir=base)
-                                    U.plot_error_analysis(payload["after_raw"], payload["t"], payload["fs"],
-                                                            passive_cancelling=payload["before_raw"],
-                                                            noisy_signal=payload["noisy"],
-                                                            algorithm_name=alg, mu=mux, L=Lx, noise_type=nlabel,
-                                                            convergence_time=payload["conv_ms"], steady_state_error=payload["sse_db"],
-                                                            save_dir=base)
-                                    U.plot_signal_flow(payload["reference"], payload["noisy"], payload["error"], payload["t"],
-                                                    alg, mux, Lx, nlabel, payload["conv_ms"], payload["sse_db"], save_dir=base)
-
-                                log_case(stage="save", status=("diverged" if diverged else "ok"),
-                                        algorithm=alg, source=src, noise_label=nlabel,
-                                        L=int(Lx), mu=float(mux),
-                                        conv_ms=meta["conv_ms"], sse_db=meta["sse_db"],
-                                        exec_time=meta["exec_time"], in_power=meta["in_power"], out_power=meta["out_power"],
-                                        save_path=base, message="")
                             except Exception as e:
-                                # record failure for this (μ,L)
+                                base = os.path.join(
+                                    os.getcwd(),
+                                    "results",
+                                    alg,
+                                    safe_name(nlabel),
+                                    f"L{int(Lx)}_mu{float(mux):.6g}"
+                                )
+
+                                os.makedirs(base, exist_ok=True)
+
                                 try:
                                     with open(os.path.join(base, "error.txt"), "w") as f:
                                         f.write(str(e))
                                 except Exception:
                                     pass
+
                                 try:
-                                    log_case(stage="save", status="error",
-                                            algorithm=alg, source=src, noise_label=nlabel,
-                                            L=int(Lx), mu=float(mux),
-                                            conv_ms=None, sse_db=None, exec_time=None, in_power=None, out_power=None,
-                                            save_path=base, message=str(e))
+                                    log_case(
+                                        stage="save",
+                                        status="error",
+                                        algorithm=alg,
+                                        source=src,
+                                        noise_label=nlabel,
+                                        L=Lx,
+                                        mu=mux,
+                                        conv_ms=None,
+                                        sse_db=None,
+                                        exec_time=None,
+                                        in_power=None,
+                                        out_power=None,
+                                        save_path=base,
+                                        message=str(e)
+                                    )
                                 except Exception:
                                     pass
-                            bump_save_progress()
-                        
-                        if mode == "best":
-                            b = state.last_best_combo
-                            _run_and_save(b["algorithm"], b["source"], b["noise_label"], b.get("wav_path",""),
-                                        state.best_L, state.best_mu)
-                        else:  # "all"
-                            for (mu, L) in muL:
-                                for (alg, src, nlabel, wfp) in combos:
-                                    _run_and_save(alg, src, nlabel, wfp, L, mu)
 
-                        # --- final UI update after saving finishes ---
+                            bump_save_progress()
+
                         def _save_done():
                             mr_progress_var.set(100.0)
                             state.unlock_ui()
+
                             if unique_noise_types == 1:
                                 set_multi_action_buttons(True, True, True, True)
                             else:
                                 set_multi_action_buttons(False, False, False, False)
-                            validate_multi_ready()  # refresh Start button enable state
-                            mr_status.config(text=f"Saved all results to: {os.path.join(os.getcwd(),'results')}", fg="green")
+
+                            validate_multi_ready()
+                            mr_status.config(
+                                text=f"Saved best results to: {os.path.join(os.getcwd(), 'results')}",
+                                fg="green"
+                            )
 
                         state.ui_call(_save_done)
-  
-                    threading.Thread(target=_save_all_or_best, daemon=False).start()
+
+                    threading.Thread(target=_save_best_worker, daemon=False).start()
 
             state.ui_call(ui_done)
 
@@ -573,10 +780,17 @@ def build_multi_ui(parent, state, default_font, header_font):
     def on_alpha_change(*_):
         txt = alpha_entry.get().strip()
         try:
-            a = float(txt); a = max(0.0, min(1.0, a))
-            alpha_info.config(text=f"Preference = {a:.2f}*μ + {1.0-a:.2f}*L (lower favored)", fg="black")
+            a = float(txt)
+            a = max(0.0, min(1.0, a))
+            alpha_info.config(
+                text=f"Preference = {a:.2f}*Convergence + {1.0-a:.2f}*SSE",
+                fg="black"
+            )
         except Exception:
-            alpha_info.config(text="Preference = a*μ + (1-a)*L (lower favored) - invalid a", fg="red")
+            alpha_info.config(
+                text="Preference = a*Convergence + (1-a)*SSE - invalid a",
+                fg="red"
+            )
         validate_multi_ready()
 
     # Initial setup and validation
@@ -658,13 +872,13 @@ def build_multi_ui(parent, state, default_font, header_font):
     L_steps_entry.bind("<KeyRelease>", validate_multi_ready)
 
     # μ–L trade-off
-    tk.Label(parent, text="μ trade-off factor:", font=default_font).grid(row=13, column=0, sticky="e")
+    tk.Label(parent, text="Metric trade-off factor a:", font=default_font).grid(row=13, column=0, sticky="e")
     alpha_entry = tk.Entry(parent, width=10)
     alpha_entry.insert(0, "0.5")
     alpha_entry.grid(row=13, column=1, sticky="w")
     alpha_entry.bind("<KeyRelease>", on_alpha_change)
 
-    alpha_info = tk.Label(parent, text="Preference = a*μ + (1-a)*L (lower favored)", font=default_font, anchor="w")
+    alpha_info = tk.Label(parent, text="Preference = a * Conv_time + (1-a) * SSE", font=default_font, anchor="w")
     alpha_info.grid(row=14, column=0, columnspan=2, sticky="w")
 
     # --- Save Results mode ---
