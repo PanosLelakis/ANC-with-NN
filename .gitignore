@@ -17,3 +17,5 @@ PT_DATASET_250314
 plot_noise_colors.py
 plot_path_responses.py
 journal.xlsx
+nn_log.csv
+checkpoints

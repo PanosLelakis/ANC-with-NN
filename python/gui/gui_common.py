@@ -126,6 +126,9 @@ def build_and_run():
     notebook.add(nn_frame, text="Neural Network")
 
     state = SharedState()
+
+    state.notebook = notebook
+
     # Set default values
     state.algo_var = tk.StringVar(value="FxNLMS")
     state.noise_source_var = tk.StringVar(value="Stationary")
@@ -136,7 +139,7 @@ def build_and_run():
 
     # NN dataset defaults
     state.nn_dataset_root_var = tk.StringVar(value="python/dataset/dataset_1")
-    state.nn_processed_root_var = tk.StringVar(value="python/dataset/processed/dataset_1_16k_40s")
+    state.nn_processed_root_var = tk.StringVar(value="python/dataset/processed")
     state.nn_checkpoint_path_var = tk.StringVar(value="")
 
     # NN model defaults
@@ -166,6 +169,7 @@ def build_and_run():
 
     state.root = root
     state._locked_widget_states = {}
+    state._locked_tab_states = {}
     state.is_locked = False
     state.is_closing = False
     state.ui_queue = queue.Queue()
@@ -218,6 +222,24 @@ def build_and_run():
         state.is_locked = True
         state._locked_widget_states = {}
 
+        # Lock other tabs
+        state._locked_tab_states = {}
+
+        try:
+            current_tab = state.notebook.index("current")
+            total_tabs = state.notebook.index("end")
+
+            for idx in range(total_tabs):
+                prev_state = state.notebook.tab(idx, "state")
+                state._locked_tab_states[idx] = prev_state
+
+                if idx != current_tab:
+                    state.notebook.tab(idx, state="disabled")
+
+        except Exception as e:
+            print("UI callback error:", e)
+            traceback.print_exc()
+
         for w in _walk_widgets(root):
             if w in allow:
                 continue
@@ -240,6 +262,18 @@ def build_and_run():
             except Exception as e:
                 print("UI callback error:", e)
                 traceback.print_exc()
+        
+        # Unlock tabs
+        try:
+            for idx, prev_state in list(state._locked_tab_states.items()):
+                state.notebook.tab(idx, state=prev_state)
+
+            state._locked_tab_states = {}
+
+        except Exception as e:
+            print("UI callback error:", e)
+            traceback.print_exc()
+        
         state._locked_widget_states = {}
         state.is_locked = False
 

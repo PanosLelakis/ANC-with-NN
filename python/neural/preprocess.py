@@ -1,11 +1,11 @@
 from pathlib import Path
-import csv
 import math
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
+from joblib import Parallel, delayed
 
-def _read_wav_mono(path):
+def read_wav_mono(path):
     # Read wav file
     fs, data = wavfile.read(str(path))
 
@@ -25,7 +25,7 @@ def _read_wav_mono(path):
 
     return int(fs), data.astype(np.float32)
 
-def _resample_if_needed(x, source_fs, target_fs):
+def resample_if_needed(x, source_fs, target_fs):
     # Check sampling rate
     source_fs = int(source_fs)
     target_fs = int(target_fs)
@@ -33,15 +33,15 @@ def _resample_if_needed(x, source_fs, target_fs):
     if source_fs == target_fs:
         return x.astype(np.float32)
 
-    # Rational resampling
-    g = math.gcd(source_fs, target_fs)
-    up = target_fs // g
-    down = source_fs // g
+    # Resample
+    gcd = math.gcd(source_fs, target_fs) # greatest common divisor
+    up = target_fs // gcd
+    down = source_fs // gcd
 
-    y = resample_poly(x, up, down)
+    y = resample_poly(x, up, down) # resample_poly instead of resample better for non-periodic signals
     return y.astype(np.float32)
 
-def _crop_or_loop(x, target_len):
+def crop_or_loop(x, target_len):
     # Fixed length signal
     target_len = int(target_len)
 
@@ -56,7 +56,7 @@ def _crop_or_loop(x, target_len):
     y = np.tile(x, reps)[:target_len]
     return y.astype(np.float32)
 
-def _normalize_unit_power(x):
+def normalize_unit_power(x):
     # Remove DC
     x = x.astype(np.float32)
     x = x - np.mean(x)
@@ -70,22 +70,22 @@ def _normalize_unit_power(x):
     x = x / np.sqrt(power + 1e-12)
     return x.astype(np.float32)
 
-def _process_one_file(input_path, output_path, target_fs, crop_sec):
-    # Load audio
-    source_fs, x = _read_wav_mono(input_path)
+def process_one_file(input_path, output_path, target_fs, crop_sec):
+    # Load audio and convert to mono
+    source_fs, x = read_wav_mono(input_path)
 
     # Original duration
     original_duration = len(x) / float(source_fs)
 
     # Resample audio
-    x = _resample_if_needed(x, source_fs, target_fs)
+    x = resample_if_needed(x, source_fs, target_fs)
 
     # Crop audio
     target_len = int(float(crop_sec) * int(target_fs))
-    x = _crop_or_loop(x, target_len)
+    x = crop_or_loop(x, target_len)
 
     # Normalize audio
-    x = _normalize_unit_power(x)
+    x = normalize_unit_power(x)
 
     # Save audio
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,7 +101,33 @@ def _process_one_file(input_path, output_path, target_fs, crop_sec):
         "normalization": "unit_power"
     }
 
-def preprocess_noise_dataset(dataset_root, processed_root, target_fs=16000, crop_sec=40, progress_callback=None):
+def process_one_job(job):
+    # Worker job
+    split, input_path, output_path, target_fs, crop_sec = job
+
+    try:
+        process_one_file(
+            input_path=input_path,
+            output_path=output_path,
+            target_fs=target_fs,
+            crop_sec=crop_sec
+        )
+
+        return {
+            "ok": True,
+            "split": split,
+            "original_path": str(input_path)
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "split": split,
+            "original_path": str(input_path),
+            "error": str(e)
+        }
+
+def preprocess_noise_dataset(dataset_root, processed_root, target_fs=16000, crop_sec=40, progress_callback=None, n_jobs=-1):
     # Dataset paths
     dataset_root = Path(dataset_root)
     processed_root = Path(processed_root)
@@ -112,83 +138,59 @@ def preprocess_noise_dataset(dataset_root, processed_root, target_fs=16000, crop
     # Split folders
     split_names = ["train", "validate"]
 
-    if not dataset_root.exists():
-        raise FileNotFoundError(f"Dataset root not found: {dataset_root}")
-
     all_jobs = []
 
     for split in split_names:
         split_dir = dataset_root / split
-
-        if not split_dir.exists():
-            raise FileNotFoundError(f"Split folder not found: {split_dir}")
 
         wav_files = sorted(split_dir.rglob("*.wav"))
 
         for wav_path in wav_files:
             rel_path = wav_path.relative_to(split_dir)
             out_path = processed_root / split / rel_path
-            all_jobs.append((split, wav_path, out_path))
-
-    if not all_jobs:
-        raise RuntimeError("No wav files found in train or validate folders")
+            all_jobs.append((split, wav_path, out_path, target_fs, crop_sec))
 
     # Output folders
     processed_root.mkdir(parents=True, exist_ok=True)
 
-    rows = []
+    processed_count = 0
     skipped = []
 
     total = len(all_jobs)
 
-    for idx, (split, input_path, output_path) in enumerate(all_jobs, start=1):
-        try:
-            row = _process_one_file(
-                input_path=input_path,
-                output_path=output_path,
-                target_fs=target_fs,
-                crop_sec=crop_sec,
-            )
+    # Parallel preprocessing
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        return_as="generator_unordered")(
+        delayed(process_one_job)(job)
+        for job in all_jobs
+    )
 
-            row["split"] = split
-            rows.append(row)
-
-        except Exception as e:
+    for idx, item in enumerate(results, start=1):
+        # Finished job
+        if item["ok"]:
+            processed_count += 1
+        else:
             skipped.append({
-                "split": split,
-                "original_path": str(input_path),
-                "error": str(e),
+                "split": item["split"],
+                "original_path": item["original_path"],
+                "error": item["error"]
             })
 
         # Progress update
         if progress_callback is not None:
             pct = 100.0 * idx / float(total)
-            progress_callback(pct)
 
-    # Metadata file
-    metadata_path = processed_root / "metadata.csv"
-
-    fieldnames = [
-        "split",
-        "original_path",
-        "processed_path",
-        "original_fs",
-        "target_fs",
-        "original_duration_sec",
-        "processed_duration_sec",
-        "normalization"
-    ]
-
-    with open(metadata_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+            try:
+                progress_callback(pct, idx, total)
+            except TypeError:
+                progress_callback(pct)
 
     return {
         "total_files": total,
-        "processed_files": len(rows),
+        "processed_files": processed_count,
         "skipped_files": len(skipped),
         "processed_root": str(processed_root),
-        "metadata_path": str(metadata_path),
-        "skipped": skipped,
+        "skipped": skipped
     }

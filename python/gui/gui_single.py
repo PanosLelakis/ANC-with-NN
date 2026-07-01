@@ -13,6 +13,7 @@ from utils.plot import (
     plot_noise_spectrogram, plot_error_spectrogram, plot_band_attenuation
 )
 from utils.audio import play_audio, stop_audio, save_wav
+from utils.time_utils import estimate_eta
 
 def build_single_ui(parent, state, default_font, header_font):
     # local playback state
@@ -281,10 +282,9 @@ def build_single_ui(parent, state, default_font, header_font):
             state.progress_bar.update_idletasks()
             # ETA
             if state.single_start_time is not None and pct > 0:
-                elapsed = time.time() - state.single_start_time
-                remaining = elapsed * (100.0 - float(pct)) / float(pct)
-                m, s = divmod(int(max(0, remaining)), 60)
-                state.eta_label.config(text=f"ETA {m:02d}:{s:02d}")
+                state.eta_label.config(
+                    text=estimate_eta(state.single_start_time, float(pct), 100.0)
+                )
             else:
                 state.eta_label.config(text="ETA --:--")
         except Exception:

@@ -1,10 +1,9 @@
 import os
-import json
+#import json
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog
 import time
-import math
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from engine.engine_multi import score_results, count_unique_combos, run_multi_case
@@ -15,6 +14,7 @@ from engine.engine_single import run_anc_capture
 from utils.result_saver import save_case_artifacts, safe_name, append_run_summary
 from utils.export_results import export_thesis_tables
 from utils import plot as U
+from utils.time_utils import estimate_eta
 
 def build_multi_ui(parent, state, default_font, header_font):
     ranked = None
@@ -93,14 +93,6 @@ def build_multi_ui(parent, state, default_font, header_font):
             start_multi_btn.config(state=(tk.NORMAL if ok else tk.DISABLED))
         except Exception:
             pass
-
-    def fmt_eta(seconds):
-        if seconds is None or not math.isfinite(seconds) or seconds < 0:
-            return "ETA --:--"
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        return f"ETA {h:02d}:{m:02d}:{s:02d}" if h else f"ETA {m:02d}:{s:02d}"
 
     def build_mu_values(mu_min, mu_max, mu_steps, scale):
         mu_steps = max(1, int(mu_steps))
@@ -388,12 +380,10 @@ def build_multi_ui(parent, state, default_font, header_font):
                                 L=None, mu=None, conv_ms=None, sse_db=None, exec_time=None,
                                 in_power=None, out_power=None, save_path="", message=str(e))
                     done += 1
-                    elapsed = time.time() - start_t
-                    eta = (elapsed / done) * (total - done) if done else None
                     pct = 100.0 * done / total
                     def ui_update():
                         mr_progress_var.set(pct)
-                        mr_status.config(text=f"{done}/{total} — {fmt_eta(eta)}")
+                        mr_status.config(text=f"{done}/{total} — {estimate_eta(start_t, done, total)}")
                     state.ui_call(ui_update)
 
             ranked_local = score_results(

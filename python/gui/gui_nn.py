@@ -1,12 +1,13 @@
 import os
+import time
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-
+from tkinter import ttk, filedialog
+from utils.time_utils import format_execution_time, estimate_eta
 from engine.engine_nn import (
     preprocess_dataset,
     start_training,
-    run_validation,
+    run_validation
 )
 
 def build_nn_ui(parent, state, default_font, header_font):
@@ -56,10 +57,26 @@ def build_nn_callbacks(state, widgets):
     def preprocess_clicked():
         # Reset progress
         widgets["progress_var"].set(0.0)
+        widgets["eta_label"].config(text="ETA --:--")
+        widgets["status_label"].config(text="Preprocessing running...", fg="black")
 
-        def update_progress(pct):
+        # Lock UI
+        state.lock_ui()
+
+        # Start measuring execution time
+        start_time = time.time()
+
+        def update_progress(pct, done=None, total=None):
             # Update progress bar
-            state.root.after(0, widgets["progress_var"].set, float(pct))
+            def ui_update():
+                widgets["progress_var"].set(float(pct))
+
+                if done is not None and total is not None:
+                    widgets["eta_label"].config(
+                        text=estimate_eta(start_time, done, total)
+                    )
+
+            state.root.after(0, ui_update)
 
         def worker():
             # Run preprocessing
@@ -68,25 +85,48 @@ def build_nn_callbacks(state, widgets):
                 processed_root=state.nn_processed_root_var.get(),
                 target_fs=state.nn_target_fs_var.get(),
                 crop_sec=state.nn_crop_sec_var.get(),
-                progress_callback=update_progress,
+                progress_callback=update_progress
             )
 
             def show_result():
-                # Show result message
+                # Show status
+                exec_label = format_execution_time(
+                    result.get("execution_time")
+                )
+
+                widgets["progress_var"].set(100.0)
+                widgets["eta_label"].config(text=exec_label)
+
                 if result["ok"]:
-                    widgets["progress_var"].set(100.0)
-                    messagebox.showinfo("Preprocessing", result["message"])
+                    widgets["status_label"].config(text=result["message"], fg="green")
                 else:
-                    messagebox.showerror("Preprocessing error", result["message"])
+                    widgets["status_label"].config(text=result["message"], fg="red")
+
+                # Unlock UI
+                state.unlock_ui()
 
             state.root.after(0, show_result)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def start_training_clicked():
+        # Lock GUI
+        state.lock_ui()
+
+        # Reset progress
+        widgets["progress_var"].set(0.0)
+        widgets["eta_label"].config(text="ETA --:--")
+        widgets["training_loss_label"].config(text="-")
+        widgets["validation_loss_label"].config(text="-")
+        widgets["status_label"].config(text="Training running...", fg="black")
+        
+        # Start measuring execution time
+        start_time = time.time()
+        
         # Training config
         config = {
             "processed_root": state.nn_processed_root_var.get(),
+            "target_fs": state.nn_target_fs_var.get(),
             "conv_layers": state.nn_conv_layers_var.get(),
             "conv_channels": state.nn_conv_channels_var.get(),
             "lstm_layers": state.nn_lstm_layers_var.get(),
@@ -98,14 +138,85 @@ def build_nn_callbacks(state, widgets):
             "optimizer": state.nn_optimizer_var.get(),
         }
 
-        result = start_training(config)
+        def update_progress(pct, epoch=None, total_epochs=None, train_loss=None, val_loss=None):
+            # Update training progress
+            def ui_update():
+                widgets["progress_var"].set(float(pct))
+
+                if epoch is not None and total_epochs is not None:
+                    widgets["eta_label"].config(
+                        text=estimate_eta(start_time, epoch, total_epochs)
+                    )
+
+                    widgets["status_label"].config(
+                        text=f"Training epoch {epoch}/{total_epochs}",
+                        fg="black"
+                    )
+
+                if train_loss is not None:
+                    widgets["training_loss_label"].config(
+                        text=f"{float(train_loss):.8f}"
+                    )
+
+                if val_loss is not None:
+                    widgets["validation_loss_label"].config(
+                        text=f"{float(val_loss):.8f}"
+                    )
+
+            state.root.after(0, ui_update)
+
+        def worker():
+            # Run training
+            result = start_training(
+                config=config,
+                progress_callback=update_progress
+            )
+
+            def show_result():
+                # Show execution time
+                exec_label = format_execution_time(
+                    result.get("execution_time")
+                )
+
+                widgets["eta_label"].config(text=exec_label)
+
+                if result["ok"]:
+                    widgets["progress_var"].set(100.0)
+                    widgets["status_label"].config(
+                        text=result["message"],
+                        fg="green"
+                    )
+                else:
+                    widgets["status_label"].config(
+                        text=result["message"],
+                        fg="red"
+                    )
+
+                # Unlock GUI
+                state.unlock_ui()
+
+            state.root.after(0, show_result)
+
+        # Start training thread
+        threading.Thread(target=worker, daemon=True).start()
 
     def run_validation_clicked():
         # Validation request
-        run_validation(
+        result = run_validation(
             checkpoint_path=state.nn_checkpoint_path_var.get(),
             processed_root=state.nn_processed_root_var.get(),
         )
+
+        exec_label = format_execution_time(
+            result.get("execution_time")
+        )
+
+        widgets["eta_label"].config(text=exec_label)
+
+        if result["ok"]:
+            widgets["status_label"].config(text=result["message"], fg="green")
+        else:
+            widgets["status_label"].config(text=result["message"], fg="red")
 
     return {
         "select_dataset_root": select_dataset_root,
@@ -284,7 +395,7 @@ def build_training_frame(parent, state, default_font, callbacks):
     ttk.Combobox(
         training_frame,
         textvariable=state.nn_optimizer_var,
-        values=["AMSGrad", "Adam", "AdamW", "SGD", "RMSprop"],
+        values=["AMSGrad", "Adam"],
         state="readonly",
         width=10
     ).grid(row=1, column=3, sticky="w")
@@ -341,8 +452,16 @@ def build_progress_frame(parent, default_font, widgets):
     )
     widgets["progress_bar"].grid(row=0, column=0, columnspan=4, sticky="ew")
 
+    widgets["eta_label"] = tk.Label(
+        progress_frame,
+        text="ETA --:--",
+        font=default_font,
+        anchor="w"
+    )
+    widgets["eta_label"].grid(row=1, column=0, columnspan=4, sticky="w")
+
     tk.Label(progress_frame, text="Training loss:", font=default_font).grid(
-        row=1, column=0, sticky="e"
+        row=2, column=0, sticky="e"
     )
 
     widgets["training_loss_label"] = tk.Label(
@@ -350,10 +469,10 @@ def build_progress_frame(parent, default_font, widgets):
         text="-",
         font=default_font
     )
-    widgets["training_loss_label"].grid(row=1, column=1, sticky="w", padx=(0, 20))
+    widgets["training_loss_label"].grid(row=2, column=1, sticky="w", padx=(0, 20))
 
     tk.Label(progress_frame, text="Validation loss:", font=default_font).grid(
-        row=1, column=2, sticky="e"
+        row=2, column=2, sticky="e"
     )
 
     widgets["validation_loss_label"] = tk.Label(
@@ -361,4 +480,12 @@ def build_progress_frame(parent, default_font, widgets):
         text="-",
         font=default_font
     )
-    widgets["validation_loss_label"].grid(row=1, column=3, sticky="w")
+    widgets["validation_loss_label"].grid(row=2, column=3, sticky="w")
+
+    widgets["status_label"] = tk.Label(
+        progress_frame,
+        text="",
+        font=default_font,
+        anchor="w"
+    )
+    widgets["status_label"].grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
