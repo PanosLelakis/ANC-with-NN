@@ -104,11 +104,26 @@ def compute_metrics(start_time, error_signal, noisy_signal, fs, N, anc_off_signa
 
 def run_anc(algorithm_name, L, mu, noise_source, noise_type,
             noise_wav_path, duration, progress_callback,
-            completion_callback=None, metrics_callback=None):
+            completion_callback=None, metrics_callback=None,
+            nn_checkpoint_path=None):
     """Single simulation engine"""
 
     # Start measuring execution time
     start_time = time.time()
+
+    # Neural Network controller
+    if algorithm_name == "Neural Network":
+        return run_neural_anc_single(
+            nn_checkpoint_path=nn_checkpoint_path,
+            noise_source=noise_source,
+            noise_type=noise_type,
+            noise_wav_path=noise_wav_path,
+            duration=duration,
+            start_time=start_time,
+            progress_callback=progress_callback,
+            completion_callback=completion_callback,
+            metrics_callback=metrics_callback
+        )
 
     # Load paths
     fs, primary_path, secondary_path = load_paths()
@@ -372,3 +387,170 @@ def run_anc_capture(algorithm_name, L, mu, noise_source, noise_type,
     )
 
     return payload
+
+def run_neural_anc_single(
+    nn_checkpoint_path,
+    noise_source,
+    noise_type,
+    noise_wav_path,
+    duration,
+    start_time,
+    progress_callback,
+    completion_callback=None,
+    metrics_callback=None
+):
+    # Run trained neural network controller for Single Run
+
+    import torch
+    from neural.model import build_model
+    from neural.train import load_paths_as_tensors, causal_fir_filter
+
+    # Check checkpoint path
+    if not nn_checkpoint_path:
+        raise ValueError("Neural Network checkpoint path is empty")
+
+    # Select device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load checkpoint
+    checkpoint = torch.load(
+        str(nn_checkpoint_path),
+        map_location=device
+    )
+
+    # Load model config from checkpoint
+    config = checkpoint.get("config", {})
+    fs = int(config.get("target_fs", 16000))
+
+    # Build model
+    model = build_model(config)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model = model.to(device)
+    model.eval()
+
+    # Build signal length
+    duration = float(duration)
+    N = int(duration * fs)
+    t = np.arange(N) / fs
+
+    # Reference signal is zero
+    reference_signal = np.zeros(N, dtype=np.float32)
+
+    # Generate or load noise
+    noise = _make_noise(
+        N=N,
+        fs=fs,
+        noise_source=noise_source,
+        noise_type=noise_type,
+        noise_wav_path=noise_wav_path
+    ).astype(np.float32)
+
+    # Input signal for neural controller
+    noisy_signal = generate_noisy_signal(reference_signal, noise).astype(np.float32)
+
+    # Convert input to torch tensor
+    x = torch.from_numpy(noisy_signal).float().unsqueeze(0).to(device)
+
+    # Load primary and secondary paths at NN sampling rate
+    primary_path, secondary_path = load_paths_as_tensors(
+        device=device,
+        target_fs=fs
+    )
+
+    # Run neural controller
+    with torch.no_grad():
+        # Desired signal at error microphone
+        d = causal_fir_filter(x, primary_path)
+
+        # Controller output
+        y = model(x)
+
+        # Anti-noise after secondary path
+        a = causal_fir_filter(y, secondary_path)
+
+        # Match lengths
+        length = min(d.shape[1], a.shape[1])
+        d = d[:, :length]
+        a = a[:, :length]
+
+        # Residual error
+        e = d - a
+
+    # Convert tensors to numpy
+    primary_output_raw = d.squeeze(0).detach().cpu().numpy().astype(np.float32)
+    secondary_output_raw = a.squeeze(0).detach().cpu().numpy().astype(np.float32)
+    error_signal = e.squeeze(0).detach().cpu().numpy().astype(np.float32)
+
+    # Match metadata length
+    N = len(error_signal)
+    t = t[:N]
+    noisy_signal = noisy_signal[:N]
+    reference_signal = reference_signal[:N]
+
+    # Make sure progress reaches 100
+    try:
+        progress_callback(100)
+    except Exception:
+        pass
+
+    # Compute metrics
+    exec_time, conv_ms, sse_db, in_power, out_power = compute_metrics(
+        start_time=start_time,
+        error_signal=error_signal,
+        noisy_signal=noisy_signal,
+        fs=fs,
+        N=N,
+        anc_off_signal=primary_output_raw
+    )
+
+    # Compute additional metrics
+    avg_pnc_dbr = compute_avg_pnc_dbr(primary_output_raw, noisy_signal)
+    band_attenuation = compute_band_attenuation(primary_output_raw, error_signal, fs)
+
+    # NN does not have adaptive filter weights
+    initial_weights = np.array([], dtype=np.float32)
+    final_weights = np.array([], dtype=np.float32)
+
+    # Convert paths to numpy
+    primary_ir = primary_path.detach().cpu().numpy().astype(np.float32)
+    secondary_ir = secondary_path.detach().cpu().numpy().astype(np.float32)
+
+    # Divergence flag
+    divergence = False
+
+    # Send metrics if needed
+    if metrics_callback is not None:
+        metrics_callback(
+            fs=fs,
+            conv_ms=conv_ms,
+            sse_db=sse_db,
+            in_power=in_power,
+            out_power=out_power,
+            divergence=divergence,
+            avg_pnc_dbr=avg_pnc_dbr,
+            band_attenuation=band_attenuation
+        )
+
+    # Send result to GUI
+    if completion_callback is not None:
+        completion_callback(
+            reference_signal,
+            noisy_signal,
+            error_signal,
+            t,
+            fs,
+            exec_time,
+            conv_ms,
+            sse_db,
+            initial_weights,
+            final_weights,
+            primary_ir,
+            secondary_ir,
+            primary_output_raw,
+            secondary_output_raw,
+            in_power,
+            out_power,
+            primary_output_raw,
+            error_signal,
+            divergence
+        )

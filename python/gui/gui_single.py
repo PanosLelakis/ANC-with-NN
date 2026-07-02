@@ -92,6 +92,17 @@ def build_single_ui(parent, state, default_font, header_font):
         
         validate_single_ready()
 
+    def on_algorithm_change(*_):
+        # Update fields according to selected algorithm
+        if state.algo_var.get() == "Neural Network":
+            state.L_entry.config(state=tk.DISABLED)
+            state.mu_entry.config(state=tk.DISABLED)
+        else:
+            state.L_entry.config(state=tk.NORMAL)
+            state.mu_entry.config(state=tk.NORMAL)
+
+        validate_single_ready()
+    
     def select_wav_file():
         path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
         
@@ -190,10 +201,18 @@ def build_single_ui(parent, state, default_font, header_font):
     def start_algorithm():
         nonlocal L, mu, duration, algorithm, noise_type, wav_file_path
 
+        algorithm = state.algo_var.get()
+
         try:
-            L  = int(state.L_entry.get())
-            mu = float(state.mu_entry.get())
             duration = float(state.duration_entry.get())
+
+            if algorithm == "Neural Network":
+                L = 0
+                mu = 0.0
+            else:
+                L = int(state.L_entry.get())
+                mu = float(state.mu_entry.get())
+
         except Exception as e:
             state.status_label.config(text=f"Input error: {e}", fg="red")
             return
@@ -214,13 +233,33 @@ def build_single_ui(parent, state, default_font, header_font):
 
         state.single_start_time = time.time()
         state.eta_label.config(text="ETA --:--")
-        
-        algorithm = state.algo_var.get()
 
         if state.noise_source_var.get() == "WAV":
             noise_type = os.path.basename(state.wav_file_path.get())
         else:
             noise_type = state.noise_var.get()
+
+        # Neural Network checkpoint
+        nn_checkpoint_path = None
+
+        if algorithm == "Neural Network":
+            nn_checkpoint_path = state.nn_checkpoint_path_var.get().strip()
+
+            if not nn_checkpoint_path:
+                nn_checkpoint_path = os.path.join(
+                    state.nn_processed_root_var.get(),
+                    "checkpoints",
+                    "best.pt"
+                )
+
+            if not os.path.exists(nn_checkpoint_path):
+                state.status_label.config(
+                    text=f"Checkpoint not found: {nn_checkpoint_path}",
+                    fg="red"
+                )
+                enable_buttons()
+                start_btn.config(state=tk.NORMAL)
+                return
         
         state.lock_ui()
 
@@ -235,11 +274,20 @@ def build_single_ui(parent, state, default_font, header_font):
         threading.Thread(
             target=run_anc,
             args=(
-                algorithm, L, mu, state.noise_source_var.get(),
-                noise_type, state.wav_file_path.get(),
-                duration, progress_cb, completion_cb
+                algorithm,
+                L,
+                mu,
+                state.noise_source_var.get(),
+                noise_type,
+                state.wav_file_path.get(),
+                duration,
+                progress_cb,
+                completion_cb
             ),
-            kwargs={"metrics_callback": None},
+            kwargs={
+                "metrics_callback": None,
+                "nn_checkpoint_path": nn_checkpoint_path
+            },
             daemon=True
         ).start()
 
@@ -256,19 +304,29 @@ def build_single_ui(parent, state, default_font, header_font):
         # Algorithm must be selected
         ok &= bool(state.algo_var.get())
         # Numeric fields
-        for e in (state.L_entry, state.mu_entry, state.duration_entry):
+        if state.algo_var.get() == "Neural Network":
+            numeric_entries = (state.duration_entry,)
+        else:
+            numeric_entries = (state.L_entry, state.mu_entry, state.duration_entry)
+
+        for e in numeric_entries:
             if e is None:
                 ok = False
                 break
+
             txt = e.get().strip()
+
             if not txt:
                 ok = False
                 break
         if ok:
             try:
-                int(state.L_entry.get())
-                float(state.mu_entry.get())
-                float(state.duration_entry.get())
+                if state.algo_var.get() == "Neural Network":
+                    float(state.duration_entry.get())
+                else:
+                    int(state.L_entry.get())
+                    float(state.mu_entry.get())
+                    float(state.duration_entry.get())
             except Exception:
                 ok = False
         # WAV path required if WAV chosen
@@ -501,9 +559,9 @@ def build_single_ui(parent, state, default_font, header_font):
 
     # Algorithm
     tk.Label(parent, text="Algorithm:", font=default_font).grid(row=1, column=0, sticky="e")
-    algo_menu = ttk.Combobox(parent, textvariable=state.algo_var, values=["LMS","NLMS","FxLMS","FxNLMS"], state="readonly", width=10)
+    algo_menu = ttk.Combobox(parent, textvariable=state.algo_var, values=["LMS","NLMS","FxLMS","FxNLMS","Neural Network"], state="readonly", width=10)
     algo_menu.grid(row=1, column=1, sticky="w")
-    algo_menu.bind("<<ComboboxSelected>>", validate_single_ready)
+    algo_menu.bind("<<ComboboxSelected>>", on_algorithm_change)
 
     # μ first (row=2)
     tk.Label(parent, text="μ:", font=default_font).grid(row=2, column=0, sticky="e")
@@ -627,4 +685,5 @@ def build_single_ui(parent, state, default_font, header_font):
 
     # Initial validation
     parent.after(0, on_noise_source_change)
+    parent.after(0, on_algorithm_change)
     parent.after(0, validate_single_ready)

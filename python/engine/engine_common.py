@@ -1,7 +1,7 @@
 def load_paths(target_fs=16000):
     """Load and peak-normalize the primary/secondary impulse responses."""
     import numpy as np
-    from scipy.io import loadmat, wavfile
+    from scipy.io import wavfile#, loadmat
 
     #import h5py
     #import mat73
