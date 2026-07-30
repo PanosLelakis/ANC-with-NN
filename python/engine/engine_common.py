@@ -1,4 +1,4 @@
-def load_paths(target_fs=16000):
+def load_paths():
     """Load and peak-normalize the primary/secondary impulse responses."""
     import numpy as np
     from scipy.io import wavfile#, loadmat

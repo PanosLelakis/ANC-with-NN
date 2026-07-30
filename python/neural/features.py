@@ -1,7 +1,8 @@
 import torch
+import torch.nn.functional as F
 
 # STFT constants
-FRAME = 20 # msec
+FRAME = 32 # msec (20 msec original)
 HOP = 10 # = frame - overlap = 10 msec
 
 def ms_to_samples(ms, fs):
@@ -37,7 +38,7 @@ def frame_signal(x, frame_length, hop_length):
 def reference_to_frames(x, fs):
     # Split reference into frames
     # input: x shape = [batch, samples]
-    # output: frames shape = [batch, num_frames, 320]
+    # output: frames shape = [batch, num_frames, 512]
     
     # Get STFT parameters
     params = get_stft_params(fs)
@@ -54,6 +55,24 @@ def signal_to_complex_stft(x, fs):
     
     # Get STFT parameters
     params = get_stft_params(fs)
+
+    # Read signal length
+    signal_length = x.shape[-1]
+
+    # Read frame settings
+    frame_length = params["win_length"]
+    hop_length = params["hop_length"]
+
+    # Compute required right padding
+    if signal_length < frame_length:
+        padding = frame_length - signal_length
+    else:
+        remainder = (signal_length - frame_length) % hop_length
+        padding = (hop_length - remainder) % hop_length
+
+    # Pad signal to complete the final STFT frame
+    if padding > 0:
+        x = F.pad(x, (0, padding))
 
     # Create window
     window = make_window(params["win_length"], device=x.device)

@@ -7,18 +7,22 @@ from utils import plot as U
 def safe_name(s):
     return "".join(c for c in str(s) if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
 
-def save_case_artifacts(payload, alg, src, nlabel, L, mu, base_root, save_plots=True, save_audio_file=True):
+def save_case_artifacts(
+    payload,
+    alg,
+    src,
+    nlabel,
+    L,
+    mu,
+    base_root,
+    save_plots=True,
+    save_audio_file=True,
+    bands_str=""
+):
     base = os.path.join(base_root, alg, safe_name(nlabel), f"L{int(L)}_mu{float(mu):.6g}")
     os.makedirs(base, exist_ok=True)
 
     diverged = bool(payload.get("divergence", False))
-
-    try:
-        wf = np.asarray(payload.get("wf", []), dtype=float)
-        if wf.size == 0 or (not np.all(np.isfinite(wf))) or (np.linalg.norm(wf) > 1e4):
-            diverged = True
-    except Exception:
-        diverged = True
 
     in_power = float(payload["in_power"])
     out_power = float(payload["out_power"])
@@ -61,7 +65,10 @@ def save_case_artifacts(payload, alg, src, nlabel, L, mu, base_root, save_plots=
             U.plot_noise_spectrogram(payload["noisy"], payload["fs"], save_dir=base_noise)
 
         U.plot_band_attenuation(
-            payload["before_raw"], payload["after_raw"], payload["fs"],
+            payload["before_raw"],
+            payload["after_raw"],
+            payload["fs"],
+            bands_str=bands_str,
             save_dir=base,
             algorithm_name=alg,
             mu=mu,
@@ -73,13 +80,20 @@ def save_case_artifacts(payload, alg, src, nlabel, L, mu, base_root, save_plots=
 
         U.plot_error_spectrogram(payload["error"], payload["fs"], save_dir=base)
 
-        U.plot_filter_weights(
-            payload["fs"], payload["wf"],
-            alg, mu, L, nlabel,
-            payload["conv_ms"],
-            payload["sse_db"],
-            save_dir=base
-        )
+        # Save filter weights only for adaptive algorithms
+        if alg != "Neural Network":
+            # Create filter weight plots
+            U.plot_filter_weights(
+                payload["fs"],
+                payload["wf"],
+                alg,
+                mu,
+                L,
+                nlabel,
+                payload["conv_ms"],
+                payload["sse_db"],
+                save_dir=base
+            )
 
         U.plot_path_analysis(
             payload["pir"], payload["noisy"], payload["d"], payload["fs"],
@@ -89,14 +103,21 @@ def save_case_artifacts(payload, alg, src, nlabel, L, mu, base_root, save_plots=
             save_dir=base
         )
 
-        if payload["z"] is not None:
-            U.plot_path_analysis(
-                payload["sir"], payload["noisy"], payload["z"], payload["fs"],
-                "Secondary", alg, mu, L, nlabel,
-                payload["conv_ms"],
-                payload["sse_db"],
-                save_dir=base
-            )
+        # Save secondary path analysis
+        U.plot_path_analysis(
+            payload["sir"],
+            payload["noisy"],
+            payload["z"],
+            payload["fs"],
+            "Secondary",
+            alg,
+            mu,
+            L,
+            nlabel,
+            payload["conv_ms"],
+            payload["sse_db"],
+            save_dir=base
+        )
 
         U.plot_error_analysis(
             payload["after_raw"], payload["t"], payload["fs"],

@@ -5,25 +5,19 @@ import gc
 import numpy as np
 import time
 import os
-import json
-from utils.logger import init_log#, log_case
+from utils.logger import init_log, log_case
 from engine.engine_single import run_anc
 from utils.plot import (
     plot_filter_weights, plot_path_analysis, plot_error_analysis, plot_signal_flow,
     plot_noise_spectrogram, plot_error_spectrogram, plot_band_attenuation
 )
-from utils.audio import play_audio, stop_audio, save_wav
+from utils.audio import play_audio, stop_audio
 from utils.time_utils import estimate_eta
+from utils.result_saver import save_case_artifacts
 
 def build_single_ui(parent, state, default_font, header_font):
-    # local playback state
+    # Local playback state
     is_playing = False
-    mu = None
-    L = None
-    duration = None
-    algorithm = None
-    noise_type = None
-    wav_file_path = None
     play_token = 0
     
     # ---------------- helpers ----------------
@@ -41,19 +35,19 @@ def build_single_ui(parent, state, default_font, header_font):
             reset_play_buttons()
             state.unlock_ui()
     
-    def disable_buttons():
-        for b in state.all_buttons:
-            try:
-                b.config(state=tk.DISABLED)
-            except:
-                pass
+    def set_result_buttons(enabled):
+        # Select button state
+        button_state = tk.NORMAL if enabled else tk.DISABLED
 
-    def enable_buttons():
-        for b in state.all_buttons:
-            try:
-                b.config(state=tk.NORMAL)
-            except:
-                pass
+        # Update result buttons
+        for button in state.all_buttons:
+            button.config(state=button_state)
+
+        # Neural Network has no filter weights
+        result = state.last_single_result
+
+        if enabled and result is not None and result["algorithm"] == "Neural Network":
+            fw_btn.config(state=tk.DISABLED)
 
     def reset_result_labels():
         conv_val.config(text="-")
@@ -64,19 +58,17 @@ def build_single_ui(parent, state, default_font, header_font):
         state.status_label.config(text="", fg="black")
 
     def reset_sim_state():
-        state.stored_reference_signal = None
-        state.stored_noisy_signal = None
-        state.stored_signal_after_primary = None
-        state.stored_signal_after_secondary = None
-        state.stored_error_signal = None
-        state.stored_t = None
-        state.stored_initial_weights = None
-        state.stored_final_weights = None
-        state.stored_primary_ir = None
-        state.stored_secondary_ir = None
-        state.stored_in_power = None
-        state.stored_out_power = None
-        state.stored_divergence = False
+        # Clear previous result
+        state.last_single_result = None
+
+        # Clear playback signals
+        state.play_before = None
+        state.play_after = None
+
+        # Disable result actions
+        set_result_buttons(False)
+
+        # Clear displayed metrics
         reset_result_labels()
 
     def on_noise_source_change():
@@ -93,14 +85,17 @@ def build_single_ui(parent, state, default_font, header_font):
         validate_single_ready()
 
     def on_algorithm_change(*_):
-        # Update fields according to selected algorithm
-        if state.algo_var.get() == "Neural Network":
-            state.L_entry.config(state=tk.DISABLED)
-            state.mu_entry.config(state=tk.DISABLED)
-        else:
-            state.L_entry.config(state=tk.NORMAL)
-            state.mu_entry.config(state=tk.NORMAL)
+        # Check Neural Network selection
+        is_neural = state.algo_var.get() == "Neural Network"
 
+        # Update adaptive parameter fields
+        state.L_entry.config(state=tk.DISABLED if is_neural else tk.NORMAL)
+        state.mu_entry.config(state=tk.DISABLED if is_neural else tk.NORMAL)
+
+        # Update backend field
+        backend_menu.config(state="readonly" if is_neural else tk.DISABLED)
+
+        # Refresh Start button
         validate_single_ready()
     
     def select_wav_file():
@@ -109,12 +104,12 @@ def build_single_ui(parent, state, default_font, header_font):
         if path:
             try:
                 stop_audio()
-            except:
+            except Exception:
                 pass
             try:
                 from matplotlib import pyplot as plt
                 plt.close('all')
-            except:
+            except Exception:
                 pass
             gc.collect()
             reset_sim_state()
@@ -124,127 +119,114 @@ def build_single_ui(parent, state, default_font, header_font):
         
         validate_single_ready()
 
-    def on_anc_complete(reference_signal, noisy_signal, error_signal,
-                    t, fs, exec_time, conv_time, steady_error_db,
-                    initial_weights, final_weights, primary_ir, secondary_ir,
-                    signal_after_primary, signal_after_secondary,
-                    in_power, out_power,
-                    before_signal_raw, after_signal_raw, divergence):
-        # store
-        state.stored_reference_signal = reference_signal
-        state.stored_noisy_signal = noisy_signal
-        state.stored_error_signal = error_signal
-        state.stored_signal_after_primary = signal_after_primary
-        state.stored_signal_after_secondary = signal_after_secondary
-        state.stored_fs = fs
-        state.stored_t = t
-        state.stored_initial_weights = initial_weights
-        state.stored_final_weights = final_weights
-        state.stored_primary_ir = primary_ir
-        state.stored_secondary_ir = secondary_ir
-        state.stored_in_power = in_power
-        state.stored_out_power = out_power
-        state.stored_execution_time = exec_time
-        state.stored_convergence_speed = conv_time
-        state.stored_steady_state_error = steady_error_db
-        state.stored_divergence = bool(divergence)
-        # raw mic-level (before/after)
-        state.stored_before_signal_raw = before_signal_raw
-        state.stored_after_signal_raw  = after_signal_raw
+    def on_anc_complete(result):
+        # Store complete simulation result
+        state.last_single_result = result
 
-        conv_val.config(text="N/A" if conv_time is None else f"{float(conv_time):.2f} ms")
-        if steady_error_db is None or not np.isfinite(float(steady_error_db)):
-            sse_val.config(text="N/A")
-        else:
-            sse_val.config(text=f"{float(steady_error_db):.2f} dBr")
-        inpow_val.config(text=f"{float(in_power):.3f}")
-        outpow_val.config(text=f"{float(out_power):.3f}")
-        exec_val.config(text=f"{float(exec_time):.2f} s")
-        if state.stored_divergence:
+        # Read metrics
+        conv_ms = result["conv_ms"]
+        sse_db = result["sse_db"]
+        in_power = result["in_power"]
+        out_power = result["out_power"]
+        exec_time = result["exec_time"]
+        divergence = bool(result["divergence"])
+
+        # Show metrics
+        conv_val.config(text="N/A" if conv_ms is None else f"{conv_ms:.2f} ms")
+        sse_val.config(text=f"{sse_db:.2f} dBr")
+        inpow_val.config(text=f"{in_power:.3f}")
+        outpow_val.config(text=f"{out_power:.3f}")
+        exec_val.config(text=f"{exec_time:.2f} s")
+
+        # Show simulation status
+        if divergence:
             state.status_label.config(text="Divergence Detected", fg="red")
         else:
             state.status_label.config(text="Done.", fg="green")
+
+        # Complete progress
         state.progress_var.set(100.0)
         state.progress_bar.update_idletasks()
 
-        # Prepare normalized copies for playback to avoid clipping; equal scale for before/after
-        before_signal_raw = np.nan_to_num(before_signal_raw, nan=0.0, posinf=0.0, neginf=0.0)
-        after_signal_raw  = np.nan_to_num(after_signal_raw,  nan=0.0, posinf=0.0, neginf=0.0)
+        # Read playback signals
+        before = np.nan_to_num(result["before_raw"], nan=0.0, posinf=0.0, neginf=0.0)
+        after = np.nan_to_num(result["after_raw"], nan=0.0, posinf=0.0, neginf=0.0)
 
-        max_abs = max(float(np.max(np.abs(before_signal_raw))),
-                        float(np.max(np.abs(after_signal_raw))), 1e-6)
+        # Use equal playback scale
+        max_abs = max(float(np.max(np.abs(before))), float(np.max(np.abs(after))), 1e-6)
         scale = min(1.0, 0.99 / max_abs)
-        state.play_before = np.clip(before_signal_raw * scale, -1.0, 1.0).astype(np.float32)
-        state.play_after = np.clip(after_signal_raw * scale, -1.0, 1.0).astype(np.float32)
 
-        try:
-            alg = state.algo_var.get()
-            src = state.noise_source_var.get()
-            nlabel = (os.path.basename(state.wav_file_path.get()) if src=="WAV" else state.noise_var.get())
-            from utils.logger import log_case
-            log_case(stage="single", status=("diverged" if state.stored_divergence else "ok"),
-                    algorithm=alg, source=src, noise_label=nlabel,
-                    L=int(state.L_entry.get()), mu=float(state.mu_entry.get()),
-                    conv_ms=state.stored_convergence_speed, sse_db=state.stored_steady_state_error,
-                    exec_time=state.stored_execution_time,
-                    in_power=state.stored_in_power, out_power=state.stored_out_power,
-                    save_path="", message=("Divergence detected." if state.stored_divergence else ""),
-                    divergence=state.stored_divergence)
-        except Exception:
-            pass
+        # Store playback signals
+        state.play_before = np.clip(before * scale, -1.0, 1.0).astype(np.float32)
+        state.play_after = np.clip(after * scale, -1.0, 1.0).astype(np.float32)
 
-        # enable plot/audio after a run
+        # Log simulation
+        log_case(
+            stage="single",
+            status="diverged" if divergence else "ok",
+            algorithm=result["algorithm"],
+            source=result["source"],
+            noise_label=result["noise_label"],
+            L=int(result["L"]),
+            mu=float(result["mu"]),
+            conv_ms=conv_ms,
+            sse_db=sse_db,
+            exec_time=exec_time,
+            in_power=in_power,
+            out_power=out_power,
+            save_path="",
+            message="Divergence detected." if divergence else "",
+            divergence=divergence
+        )
+
+        # Unlock GUI
         state.unlock_ui()
-        enable_buttons()
+
+        # Enable result actions
+        set_result_buttons(True)
+
+        # Restore source widgets
         on_noise_source_change()
 
-    def start_algorithm():
-        nonlocal L, mu, duration, algorithm, noise_type, wav_file_path
+    def show_run_error(message):
+        # Unlock GUI
+        state.unlock_ui()
 
-        algorithm = state.algo_var.get()
-
-        try:
-            duration = float(state.duration_entry.get())
-
-            if algorithm == "Neural Network":
-                L = 0
-                mu = 0.0
-            else:
-                L = int(state.L_entry.get())
-                mu = float(state.mu_entry.get())
-
-        except Exception as e:
-            state.status_label.config(text=f"Input error: {e}", fg="red")
-            return
-
-        stop_audio()
-        try:
-            from matplotlib import pyplot as plt
-            plt.close('all')
-        except:
-            pass
-        disable_buttons()
-        gc.collect()
-        reset_result_labels()
-        start_btn.config(state=tk.DISABLED)
-        state.status_label.config(text="Running…", fg="black")
-        state.progress_var.set(0)
-        state.progress_bar.update_idletasks()
-
-        state.single_start_time = time.time()
+        # Reset ETA
         state.eta_label.config(text="ETA --:--")
 
-        if state.noise_source_var.get() == "WAV":
-            noise_type = os.path.basename(state.wav_file_path.get())
+        # Show error
+        state.status_label.config(text=f"Simulation error: {message}", fg="red")
+
+        # Refresh Start button
+        validate_single_ready()
+
+    def start_algorithm():
+        # Read validated simulation inputs
+        algorithm = state.algo_var.get()
+        duration = float(state.duration_entry.get())
+        noise_source = state.noise_source_var.get()
+        noise_wav_path = state.wav_file_path.get()
+        nn_backend = state.nn_backend_var.get().lower()
+
+        # Read noise label
+        if noise_source == "WAV":
+            noise_type = os.path.basename(noise_wav_path)
         else:
             noise_type = state.noise_var.get()
 
-        # Neural Network checkpoint
+        # Initialize checkpoint path
         nn_checkpoint_path = None
 
+        # Read algorithm-specific values
         if algorithm == "Neural Network":
+            L = 0
+            mu = 0.0
+
+            # Read selected checkpoint
             nn_checkpoint_path = state.nn_checkpoint_path_var.get().strip()
 
+            # Use default checkpoint
             if not nn_checkpoint_path:
                 nn_checkpoint_path = os.path.join(
                     state.nn_processed_root_var.get(),
@@ -252,44 +234,86 @@ def build_single_ui(parent, state, default_font, header_font):
                     "best.pt"
                 )
 
+            # Check PyTorch checkpoint
             if not os.path.exists(nn_checkpoint_path):
                 state.status_label.config(
                     text=f"Checkpoint not found: {nn_checkpoint_path}",
                     fg="red"
                 )
-                enable_buttons()
-                start_btn.config(state=tk.NORMAL)
                 return
-        
+
+            # Check ONNX model
+            if nn_backend == "onnx":
+                onnx_path = os.path.splitext(nn_checkpoint_path)[0] + ".onnx"
+
+                if not os.path.exists(onnx_path):
+                    state.status_label.config(
+                        text=f"ONNX model not found: {onnx_path}",
+                        fg="red"
+                    )
+                    return
+
+        else:
+            L = int(state.L_entry.get())
+            mu = float(state.mu_entry.get())
+
+        # Stop previous playback
+        stop_audio()
+
+        # Close previous plots
+        try:
+            from matplotlib import pyplot as plt
+            plt.close("all")
+        except Exception:
+            pass
+
+        # Clear previous result
+        reset_sim_state()
+
+        # Release unused objects
+        gc.collect()
+
+        # Prepare GUI
+        start_btn.config(state=tk.DISABLED)
+        state.status_label.config(text="Running…", fg="black")
+        state.progress_var.set(0.0)
+        state.progress_bar.update_idletasks()
+        state.single_start_time = time.time()
+        state.eta_label.config(text="ETA --:--")
         state.lock_ui()
 
-        init_log(run_kind="single", clear=True, log_dir=os.path.join(os.getcwd(), "results"))
+        # Initialize log
+        init_log(run_kind="single", clear=True)
 
-        def progress_cb(pct):
-            state.ui_call(update_progress, pct)
+        def progress_callback(percentage):
+            state.ui_call(update_progress, percentage)
 
-        def completion_cb(*args):
-            state.ui_call(on_anc_complete, *args)
+        def worker():
+            try:
+                # Run simulation
+                result = run_anc(
+                    algorithm_name=algorithm,
+                    L=L,
+                    mu=mu,
+                    noise_source=noise_source,
+                    noise_type=noise_type,
+                    noise_wav_path=noise_wav_path,
+                    duration=duration,
+                    progress_callback=progress_callback,
+                    nn_checkpoint_path=nn_checkpoint_path,
+                    nn_backend=nn_backend,
+                    paths=state.anc_paths
+                )
 
-        threading.Thread(
-            target=run_anc,
-            args=(
-                algorithm,
-                L,
-                mu,
-                state.noise_source_var.get(),
-                noise_type,
-                state.wav_file_path.get(),
-                duration,
-                progress_cb,
-                completion_cb
-            ),
-            kwargs={
-                "metrics_callback": None,
-                "nn_checkpoint_path": nn_checkpoint_path
-            },
-            daemon=True
-        ).start()
+                # Send result to GUI
+                state.ui_call(on_anc_complete, result)
+
+            except Exception as error:
+                # Send error to GUI
+                state.ui_call(show_run_error, str(error))
+
+        # Start worker thread
+        threading.Thread(target=worker, daemon=True).start()
 
     def validate_single_ready(*_):
         """Enable Start only when all required fields are filled and valid."""
@@ -319,16 +343,34 @@ def build_single_ui(parent, state, default_font, header_font):
             if not txt:
                 ok = False
                 break
+
         if ok:
             try:
-                if state.algo_var.get() == "Neural Network":
-                    float(state.duration_entry.get())
-                else:
-                    int(state.L_entry.get())
-                    float(state.mu_entry.get())
-                    float(state.duration_entry.get())
+                # Read duration
+                duration_value = float(state.duration_entry.get())
+
+                # Check duration
+                ok = duration_value > 0.0
+
+                # Check adaptive parameters
+                if state.algo_var.get() != "Neural Network":
+                    # Read filter length
+                    L_value = int(state.L_entry.get())
+
+                    # Read step size
+                    mu_value = float(state.mu_entry.get())
+
+                    # Check adaptive parameters
+                    ok = (
+                        ok
+                        and L_value > 0
+                        and mu_value > 0.0
+                    )
+
             except Exception:
+                # Mark invalid input
                 ok = False
+
         # WAV path required if WAV chosen
         if state.noise_source_var.get() == "WAV":
             ok &= bool(state.wav_file_path.get().strip())
@@ -372,7 +414,7 @@ def build_single_ui(parent, state, default_font, header_font):
 
         play_before_btn.config(text="Stop playing", state=tk.NORMAL)
         state.lock_ui(allow_widgets=(play_before_btn,))
-        play_audio(state.play_before, sample_rate=int(state.stored_fs))
+        play_audio(state.play_before, sample_rate=int(state.last_single_result["fs"]))
         state.root.after(50, _poll_playback, token)
 
     def toggle_play_after():
@@ -392,176 +434,179 @@ def build_single_ui(parent, state, default_font, header_font):
 
         play_after_btn.config(text="Stop playing", state=tk.NORMAL)
         state.lock_ui(allow_widgets=(play_after_btn,))
-        play_audio(state.play_after, sample_rate=int(state.stored_fs))
+        play_audio(state.play_after, sample_rate=int(state.last_single_result["fs"]))
         state.root.after(50, _poll_playback, token)
+
+    def plot_metadata(result, save_dir):
+        # Return common plot metadata
+        return {
+            "algorithm_name": result["algorithm"],
+            "mu": result["mu"],
+            "L": result["L"],
+            "noise_type": result["noise_label"],
+            "convergence_time": result["conv_ms"],
+            "steady_state_error": result["sse_db"],
+            "save_dir": save_dir
+        }
     
     def plot_filter(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-
-        plot_filter_weights(
-            fs=state.stored_fs, w_final=state.stored_final_weights,
-            algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed,
-            steady_state_error=state.stored_steady_state_error, save_dir=save_dir
-        )
+        result = state.last_single_result
+        plot_filter_weights(result["fs"], result["wf"], **plot_metadata(result, save_dir))
 
     def plot_primary_path_effect(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-
+        result = state.last_single_result
         plot_path_analysis(
-            state.stored_primary_ir, state.stored_noisy_signal, state.stored_signal_after_primary, state.stored_fs,
-            title_prefix="Primary", algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error, save_dir=save_dir
+            result["pir"], result["noisy"], result["d"], result["fs"], "Primary",
+            **plot_metadata(result, save_dir)
         )
 
     def plot_secondary_path_effect(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-
-        if state.stored_signal_after_secondary is None:
-            state.status_label.config(text="Secondary path not available", fg="red")
-            return
-        
+        result = state.last_single_result
         plot_path_analysis(
-            state.stored_secondary_ir, state.stored_noisy_signal, state.stored_signal_after_secondary, state.stored_fs,
-            title_prefix="Secondary", algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error, save_dir=save_dir
+            result["sir"], result["noisy"], result["z"], result["fs"], "Secondary",
+            **plot_metadata(result, save_dir)
         )
 
     def plot_error(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-
+        result = state.last_single_result
         plot_error_analysis(
-            state.stored_error_signal, state.stored_t, state.stored_fs,
-            passive_cancelling=state.stored_before_signal_raw, noisy_signal=state.stored_noisy_signal,
-            algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed,
-            steady_state_error=state.stored_steady_state_error, save_dir=save_dir
+            result["error"], result["t"], result["fs"],
+            passive_cancelling=result["before_raw"],
+            noisy_signal=result["noisy"],
+            **plot_metadata(result, save_dir)
         )
 
     def plot_signal(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-
+        result = state.last_single_result
         plot_signal_flow(
-            state.stored_reference_signal, state.stored_noisy_signal, state.stored_error_signal, state.stored_t,
-            algorithm_name=algorithm, mu=mu, L=L, noise_type=noise_type,
-            convergence_time=state.stored_convergence_speed, steady_state_error=state.stored_steady_state_error, save_dir=save_dir
+            result["reference"], result["noisy"], result["error"], result["t"],
+            **plot_metadata(result, save_dir)
         )
-    
+
     def plot_noise_spec(save_dir=None):
-        
-        if state.stored_noisy_signal is None:
-            state.status_label.config(text="No noise signal available.", fg="red")
-            return
-        
-        plot_noise_spectrogram(state.stored_noisy_signal, state.stored_fs, save_dir=save_dir)
-    
+        result = state.last_single_result
+        plot_noise_spectrogram(result["noisy"], result["fs"], save_dir=save_dir)
+
     def plot_error_spec(save_dir=None):
-        
-        if state.stored_error_signal is None:
-            state.status_label.config(text="No error signal available.", fg="red")
-            return
-        
-        plot_error_spectrogram(state.stored_error_signal, state.stored_fs, save_dir=save_dir)
+        result = state.last_single_result
+        plot_error_spectrogram(result["error"], result["fs"], save_dir=save_dir)
 
     def plot_band_attn(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-        
-        if state.stored_signal_after_primary is None or state.stored_error_signal is None:
-            state.status_label.config(text="Run a simulation first.", fg="red")
-            return
-        
+        result = state.last_single_result
         bands_str = state.bands_text.get("1.0", "end-1c").strip()
-        plot_band_attenuation(state.stored_before_signal_raw, state.stored_after_signal_raw,
-                              state.stored_fs, bands_str=bands_str, algorithm_name=algorithm,
-                              mu=mu, L=L, noise_type=noise_type, convergence_time=state.stored_convergence_speed,
-                              steady_state_error=state.stored_steady_state_error, save_dir=save_dir)
-    
-    def write_metrics(save_dir=None):
-        nonlocal mu, L, algorithm, noise_type
-        meta = dict(algorithm=algorithm, L=L, mu=mu, noise_label=noise_type,
-                    fs=int(state.stored_fs),
-                    exec_time=round(float(state.stored_execution_time or 0.0), 2),
-                    conv_ms=round(float(0.0 if state.stored_convergence_speed is None else state.stored_convergence_speed), 2),
-                    sse_db=round(float(state.stored_steady_state_error), 2),
-                    in_power=round(float(state.stored_in_power or 0.0), 3),
-                    out_power=round(float(state.stored_out_power or 0.0), 3),
-                    divergence=bool(getattr(state, "stored_divergence", False)),
-                    status=("diverged" if getattr(state, "stored_divergence", False) else "ok"))
-        with open(os.path.join(save_dir, "metrics.json"), "w") as f:
-            json.dump(meta, f, indent=2)
+
+        plot_band_attenuation(
+            result["before_raw"], result["after_raw"], result["fs"],
+            bands_str=bands_str,
+            **plot_metadata(result, save_dir)
+        )
     
     # --- Save Results (single run) ---
     def save_single_results():
-        try:
-            alg = state.algo_var.get()
-            L_local  = int(state.L_entry.get())
-            mu_local = float(state.mu_entry.get())
-            nlabel = (os.path.basename(state.wav_file_path.get())
-                    if state.noise_source_var.get()=="WAV"
-                    else state.noise_var.get())
-            safe_noise = "".join(c for c in nlabel if c.isalnum() or c in (" ","-","_")).strip().replace(" ","_")
-            base_root = os.path.join(os.getcwd(), "results", alg, safe_noise)
-            base = os.path.join(base_root, f"L{int(L_local)}_mu{float(mu_local):.6g}")
-            os.makedirs(base, exist_ok=True)
-        except Exception as e:
-            state.status_label.config(text=f"Save failed: {e}", fg="red")
-            return
+        # Read complete simulation result
+        payload = state.last_single_result
 
-        # build the todo list
-        jobs = []
+        # Read original noise source
+        source = payload["source"]
 
-        # 1) metrics.json
-        jobs.append(("metrics", lambda: write_metrics(save_dir=base)))
+        # Read original noise label
+        noise_label = payload["noise_label"]
 
-        # 2) audio WAV
-        jobs.append(("audio_wav", lambda: save_wav(state.stored_before_signal_raw, state.stored_after_signal_raw,
-                                                   state.stored_fs, base)))
+        # Read custom frequency bands
+        bands_str = state.bands_text.get("1.0", "end-1c").strip()
 
-        # 3) figures
-        jobs.append(("filter_weights", lambda: plot_filter(save_dir=base)))
-        jobs.append(("primary_path", lambda: plot_primary_path_effect(save_dir=base)))
-        if state.stored_signal_after_secondary is not None:
-            jobs.append(("secondary_path", lambda: plot_secondary_path_effect(save_dir=base)))
-        jobs.append(("error_analysis", lambda: plot_error(save_dir=base)))
-        jobs.append(("signal_flow", lambda: plot_signal(save_dir=base)))
-        jobs.append(("band_attenuation", lambda: plot_band_attn(save_dir=base)))
-        jobs.append(("noise_spectrogram", lambda: plot_noise_spec(save_dir=base)))
-        jobs.append(("error_spectrogram", lambda: plot_error_spec(save_dir=base)))
+        # Build results root
+        results_root = os.path.join(os.getcwd(), "results")
 
-        total = len(jobs)
-        state.status_label.config(text=f"Saving 0/{total}…", fg="black")
-        #state.disable_buttons_cb()
-        disable_buttons()
+        # Show saving status
+        state.status_label.config(text="Saving results...", fg="black")
+
+        # Disable result buttons
+        set_result_buttons(False)
+
+        # Lock GUI
         state.lock_ui()
 
-        def _worker():
-            done = 0
-            for name, fn in jobs:
-                try:
-                    fn()
-                except Exception as e:
-                    # If error, report and continue with next job
-                    msg = f"{name} failed: {e}"
-                    state.ui_call(state.status_label.config, text=msg, fg="red")
-                done += 1
-                state.ui_call(state.status_label.config, text=f"Saving {done}/{total}…", fg="black")
-            def _finish():
-                state.unlock_ui()
-                #state.enable_buttons_cb()
-                enable_buttons()
-                state.status_label.config(text=f"Saved to: {base}", fg="green")
-            state.ui_call(_finish)
-        threading.Thread(target=_worker, daemon=True).start()
+        def finish_save(message, color):
+            # Unlock GUI
+            state.unlock_ui()
+
+            # Restore result buttons
+            set_result_buttons(True)
+
+            # Show final status
+            state.status_label.config(text=message, fg=color)
+
+        def worker():
+            # Save complete result
+            try:
+                # Save artifacts
+                metadata = save_case_artifacts(
+                    payload=payload,
+                    alg=payload["algorithm"],
+                    src=source,
+                    nlabel=noise_label,
+                    L=payload["L"],
+                    mu=payload["mu"],
+                    base_root=results_root,
+                    save_plots=True,
+                    save_audio_file=True,
+                    bands_str=bands_str
+                )
+
+            except Exception as error:
+                # Show save error
+                state.ui_call(
+                    finish_save,
+                    f"Save failed: {error}",
+                    "red"
+                )
+
+                # Stop worker
+                return
+
+            # Show saved folder
+            state.ui_call(
+                finish_save,
+                f"Saved to: {metadata['save_path']}",
+                "green"
+            )
+
+        # Start saving thread
+        threading.Thread(
+            target=worker,
+            daemon=True
+        ).start()
     
     # ---------------- UI ----------------
     # Title
     tk.Label(parent, text="Single Run", font=header_font).grid(row=0, column=0, columnspan=2, sticky="w")
 
     # Algorithm
-    tk.Label(parent, text="Algorithm:", font=default_font).grid(row=1, column=0, sticky="e")
-    algo_menu = ttk.Combobox(parent, textvariable=state.algo_var, values=["LMS","NLMS","FxLMS","FxNLMS","Neural Network"], state="readonly", width=10)
-    algo_menu.grid(row=1, column=1, sticky="w")
+    algorithm_frame = tk.Frame(parent)
+    algorithm_frame.grid(row=1, column=1, sticky="w")
+
+    algo_menu = ttk.Combobox(
+        algorithm_frame,
+        textvariable=state.algo_var,
+        values=["LMS", "NLMS", "FxLMS", "FxNLMS", "Neural Network"],
+        state="readonly",
+        width=12
+    )
+    algo_menu.pack(side="left")
     algo_menu.bind("<<ComboboxSelected>>", on_algorithm_change)
+
+    # NN Backend
+    tk.Label(algorithm_frame, text="NN Backend:", font=default_font).pack(side="left", padx=(10, 2))
+
+    backend_menu = ttk.Combobox(
+        algorithm_frame,
+        textvariable=state.nn_backend_var,
+        values=["PyTorch", "ONNX"],
+        state=tk.DISABLED,
+        width=8
+    )
+    backend_menu.pack(side="left")
 
     # μ first (row=2)
     tk.Label(parent, text="μ:", font=default_font).grid(row=2, column=0, sticky="e")
@@ -584,9 +629,9 @@ def build_single_ui(parent, state, default_font, header_font):
     tk.Label(parent, text="Noise Source:", font=default_font).grid(row=5, column=0, sticky="e")
     src_frame = tk.Frame(parent); src_frame.grid(row=5, column=1, sticky="w")
     tk.Radiobutton(src_frame, text="Stationary", variable=state.noise_source_var, value="Stationary",
-                   command=lambda:(on_noise_source_change(), validate_single_ready())).pack(side="left")
+                   command=on_noise_source_change).pack(side="left")
     tk.Radiobutton(src_frame, text="WAV", variable=state.noise_source_var, value="WAV",
-                   command=lambda:(on_noise_source_change(), validate_single_ready())).pack(side="left")
+                   command=on_noise_source_change).pack(side="left")
 
     tk.Label(parent, text="Noise Type:", font=default_font).grid(row=6, column=0, sticky="e")
     noise_menu = ttk.Combobox(parent, textvariable=state.noise_var,
@@ -686,4 +731,3 @@ def build_single_ui(parent, state, default_font, header_font):
     # Initial validation
     parent.after(0, on_noise_source_change)
     parent.after(0, on_algorithm_change)
-    parent.after(0, validate_single_ready)

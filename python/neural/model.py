@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 from neural.features import (
@@ -178,6 +177,27 @@ class SimpleCRN(nn.Module): # nn.Module means PyTorch model (fck my life)
 
         # Return tensor
         return x
+
+    def forward_stft(self, z):
+        # Store encoder outputs
+        skips = []
+
+        # Run encoder
+        for layer in self.encoder:
+            z = layer(z)
+            skips.append(z)
+
+        # Run LSTM
+        z = self.run_lstm(z)
+
+        # Run decoder
+        for layer_index, layer in enumerate(self.decoder):
+            skip_index = len(skips) - 1 - layer_index
+            z = z + skips[skip_index]
+            z = layer(z)
+
+        # Return predicted STFT channels
+        return z
     
     def forward(self, x):
         # Store length of the input time-domain signal (number of samples)
@@ -189,22 +209,8 @@ class SimpleCRN(nn.Module): # nn.Module means PyTorch model (fck my life)
         # Apply frame delay to STFT channels if specified
         z = apply_frame_delay(z, self.delay_m)
 
-        # Create skip connections list
-        skips = []
-
-        # Iterate through encoder layers and store skip connections
-        for layer in self.encoder:
-            z = layer(z) # Apply encoder layer
-            skips.append(z) # Store skip connection
-
-        # Run LSTM on the encoded features
-        z = self.run_lstm(z)
-
-        # Iterate through decoder layers and apply skip connections in reverse order
-        for layer_index, layer in enumerate(self.decoder):
-            skip_index = len(skips) - 1 - layer_index
-            z = z + skips[skip_index]
-            z = layer(z) # Apply decoder layer
+        # Run Neural Network core
+        z = self.forward_stft(z)
 
         # Convert predicted STFT channels back to time-domain signal
         y = stft_channels_to_signal(
@@ -227,7 +233,6 @@ class FullCRN(nn.Module):
 def build_model(config):
     # Parse model settings
     fs = int(config.get("target_fs", 16000))
-    conv_layers = int(config.get("conv_layers", 2))
     conv_channels = parse_conv_channels(config.get("conv_channels", "16,32"))
     lstm_layers = int(config.get("lstm_layers", 1))
     lstm_hidden = int(config.get("lstm_hidden", 128))

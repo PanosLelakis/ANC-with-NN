@@ -2,12 +2,20 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample, lfilter
 import time
-from engine.engine_common import load_paths
 from algorithms.lms import LMS
 from algorithms.nlms import NLMS
 from algorithms.fxlms import FxLMS
 from algorithms.fxnlms import FxNLMS
-from utils.noise import *
+from utils.noise import (
+    compute_noise_power,
+    generate_blue_noise_len,
+    generate_brownian_noise_len,
+    generate_grey_noise_len,
+    generate_noisy_signal,
+    generate_pink_noise_len,
+    generate_violet_noise_len,
+    generate_white_noise_len
+)
 from utils.performance_metrics import (
     compute_convergence_time,
     compute_steady_state_error,
@@ -25,7 +33,15 @@ faulthandler.enable()
 # Ignore WAV file warnings because they mean nothing
 warnings.simplefilter("ignore", WavFileWarning)
 
-def _make_noise(N, fs, noise_source, noise_type, noise_wav_path):
+# Available adaptive algorithms
+ALGORITHM_CLASSES = {
+    "LMS": LMS,
+    "NLMS": NLMS,
+    "FxLMS": FxLMS,
+    "FxNLMS": FxNLMS
+}
+
+def make_noise(N, fs, noise_source, noise_type, noise_wav_path):
     """Generate stationary noise or load/loop a WAV, then (for WAV) RMS-normalize."""
     if noise_source == "WAV" and noise_wav_path:
         wav_fs, wav_data = wavfile.read(noise_wav_path)
@@ -70,11 +86,7 @@ def _make_noise(N, fs, noise_source, noise_type, noise_wav_path):
             "Blue": generate_blue_noise_len,
         }
 
-        # If unknown noise type, raise error
-        if noise_type not in gens:
-            raise ValueError(f"Unknown noise type: {noise_type}")
-        
-        # Return generated colored noise
+        # Generate selected colored noise
         return gens[noise_type](N).astype(np.float32)
 
 def compute_metrics(start_time, error_signal, noisy_signal, fs, N, anc_off_signal):
@@ -102,34 +114,50 @@ def compute_metrics(start_time, error_signal, noisy_signal, fs, N, anc_off_signa
     # Return all metrics
     return exec_time, conv_ms, sse_dbr, in_power, out_power
 
-def run_anc(algorithm_name, L, mu, noise_source, noise_type,
-            noise_wav_path, duration, progress_callback,
-            completion_callback=None, metrics_callback=None,
-            nn_checkpoint_path=None):
+def run_anc(
+    algorithm_name,
+    L,
+    mu,
+    noise_source,
+    noise_type,
+    noise_wav_path,
+    duration,
+    progress_callback=None,
+    nn_checkpoint_path=None,
+    nn_backend="pytorch",
+    preloaded_noise=None,
+    paths=None
+):
     """Single simulation engine"""
 
     # Start measuring execution time
     start_time = time.time()
 
-    # Neural Network controller
+    # Use empty progress callback when none was provided
+    if progress_callback is None:
+        # Ignore progress updates
+        progress_callback = lambda _percentage: None
+
+    # Run Neural Network controller
     if algorithm_name == "Neural Network":
+        # Run Neural Network simulation
         return run_neural_anc_single(
             nn_checkpoint_path=nn_checkpoint_path,
+            nn_backend=nn_backend,
             noise_source=noise_source,
             noise_type=noise_type,
             noise_wav_path=noise_wav_path,
             duration=duration,
             start_time=start_time,
             progress_callback=progress_callback,
-            completion_callback=completion_callback,
-            metrics_callback=metrics_callback
+            preloaded_noise=preloaded_noise,
+            paths=paths
         )
 
-    # Load paths
-    fs, primary_path, secondary_path = load_paths()
+    # Read provided paths
+    fs, primary_path, secondary_path = paths
 
     # Load constants and time vector
-    duration = float(duration)
     N = int(duration * fs)
     t = np.arange(N) / fs
     L = int(L)
@@ -140,22 +168,25 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     # Generate reference signal (zero)
     reference_signal = np.zeros(N, dtype=np.float32)
 
-    # Load noise
-    noise = _make_noise(N, fs, noise_source, noise_type, noise_wav_path)
+    # Use preloaded noise when available
+    if preloaded_noise is None:
+        # Create or load noise
+        noise = make_noise(
+            N,
+            fs,
+            noise_source,
+            noise_type,
+            noise_wav_path
+        )
+    else:
+        # Read provided noise
+        noise = np.asarray(preloaded_noise, dtype=np.float32)
+
+    # Build noisy signal
     noisy_signal = generate_noisy_signal(reference_signal, noise)
 
-    # Call selected algorithm constructor
-    if algorithm_name == "LMS":
-        algorithm = LMS(L, mu, initial_weights)
-    elif algorithm_name == "NLMS":
-        algorithm = NLMS(L, mu, initial_weights)
-    elif algorithm_name == "FxLMS":
-        algorithm = FxLMS(L, mu, initial_weights)
-    elif algorithm_name == "FxNLMS":
-        algorithm = FxNLMS(L, mu, initial_weights)
-    else:
-        # If uknown algorithm, raise error
-        raise ValueError(f"Unknown algorithm: {algorithm_name}")
+    # Create selected adaptive algorithm
+    algorithm = ALGORITHM_CLASSES[algorithm_name](L, mu, initial_weights)
 
     # Convolve input with paths
     primary_output_raw = np.convolve(noisy_signal, primary_path, mode="full")[:N].astype(np.float32, copy=False)
@@ -219,27 +250,30 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
 
         error_signal[n] = float(en)
         
-        # Divergence guard
-        try:
-            w = np.asarray(algorithm.w, dtype=float)
-            if (not np.all(np.isfinite(w))) or (np.linalg.norm(w) > MAX_WEIGHT_NORM):
-                divergence = True
-                error_signal[n:] = error_signal[n]
-                break
-        except Exception:
-            pass
-        
-        if (n % progress_step) == 0:
-            try:
-                progress_callback(int((n / N) * 100))
-            except Exception:
-                pass
+        # Read adaptive weights
+        w = np.asarray(algorithm.w,dtype=float)
 
-    # Make sure UI reaches 100%
-    try:
-        progress_callback(100)
-    except Exception:
-        pass
+        # Check unstable weights
+        if (
+            not np.all(np.isfinite(w))
+            or np.linalg.norm(w) > MAX_WEIGHT_NORM
+        ):
+            # Mark divergence
+            divergence = True
+
+            # Complete remaining signal
+            error_signal[n:] = error_signal[n]
+
+            # Stop simulation
+            break
+        
+        # Update simulation progress
+        if (n % progress_step) == 0:
+            # Send percentage
+            progress_callback(int((n / N) * 100))
+
+    # Complete simulation progress
+    progress_callback(100)
 
     after_signal_raw = np.clip(error_signal, -1e3, 1e3)
     before_signal_raw = primary_output_raw
@@ -258,175 +292,96 @@ def run_anc(algorithm_name, L, mu, noise_source, noise_type,
     tail_error_peak = float(np.max(np.abs(error_signal[tail])) + 1e-12)
     tail_before_peak = float(np.max(np.abs(before_signal_raw[tail])) + 1e-12)
 
-    bad_metrics = (
-        (sse_db is None) or
-        (not np.isfinite(float(sse_db)))
-    )
+    # Check tail power increase
+    bad_tail_power = (out_power > MAX_TAIL_POWER_RATIO * max(float(in_power), 1e-12))
 
-    bad_tail_power = (
-        np.isfinite(out_power) and
-        np.isfinite(in_power) and
-        out_power > MAX_TAIL_POWER_RATIO * max(float(in_power), 1e-12)
-    )
+    bad_tail_peak = (tail_error_peak > MAX_TAIL_PEAK_RATIO * tail_before_peak)
 
-    bad_tail_peak = (
-        tail_error_peak > MAX_TAIL_PEAK_RATIO * tail_before_peak
-    )
-
-    if bad_metrics or bad_tail_power or bad_tail_peak:
+    # Mark unstable final result
+    if bad_tail_power or bad_tail_peak:
         divergence = True
 
-    if metrics_callback is not None:
-        metrics_callback(
-            fs=fs,
-            conv_ms=conv_ms,
-            sse_db=sse_db,
-            in_power=in_power,
-            out_power=out_power,
-            divergence=divergence,
-            avg_pnc_dbr=avg_pnc_dbr,
-            band_attenuation=band_attenuation
-        )
+    # Build complete simulation result
+    result = {
+        # Simulation settings
+        "algorithm": algorithm_name,
+        "L": int(L),
+        "mu": float(mu),
 
-    if completion_callback is not None:
-        completion_callback(
-            reference_signal, noisy_signal, error_signal, t, fs, exec_time,
-            conv_ms, sse_db, init_weights, algorithm.w, primary_path, secondary_path,
-            primary_stream, secondary_stream, in_power, out_power,
-            before_signal_raw, after_signal_raw, divergence
-        )
+        # Noise settings
+        "source": noise_source,
+        "noise_label": noise_type,
+        "wav_path": (
+            noise_wav_path
+            if noise_source == "WAV"
+            else ""
+        ),
 
-def run_anc_headless(algorithm_name, L, mu, noise_source, noise_type,
-                     noise_wav_path, duration):
-    # Simulation results dict
-    results = {}
+        # Input and output signals
+        "reference": reference_signal,
+        "noisy": noisy_signal,
+        "error": error_signal,
+        "t": t,
 
-    # Dummy progress callback for multi runner
-    def _dummy_progress(_pct):
-        pass
+        # Sampling rate
+        "fs": int(fs),
 
-    # Metrics callback to capture results for multi runner
-    def _capture_metrics(*, fs, conv_ms, sse_db, in_power, out_power, divergence=False,
-                         avg_pnc_dbr=None, band_attenuation=None):
-        # Add simulation metrics to results dict
-        results.update({
-            "mu": float(mu),
-            "L": int(L),
-            "conv_ms": float(duration) * 1000.0 if conv_ms is None else float(conv_ms),
-            "sse_db": float(sse_db),
-            "in_power": float(in_power),
-            "out_power": float(out_power),
-            "fs": int(fs),
-            "divergence": bool(divergence),
-            "avg_pnc_dbr": None if avg_pnc_dbr is None else float(avg_pnc_dbr),
-            "band_attenuation": {} if band_attenuation is None else band_attenuation
-        })
+        # Performance metrics
+        "exec_time": float(exec_time),
+        "conv_ms": conv_ms,
+        "sse_db": sse_db,
+        "in_power": float(in_power),
+        "out_power": float(out_power),
+        "avg_pnc_dbr": float(avg_pnc_dbr),
+        "band_attenuation": band_attenuation,
 
-    # Run simulation for multi runner
-    run_anc(
-        algorithm_name, int(L), float(mu), noise_source, noise_type,
-        noise_wav_path, float(duration),
-        _dummy_progress,
-        completion_callback=None,
-        metrics_callback=_capture_metrics
-    )
+        # Filter weights
+        "w0": init_weights,
+        "wf": algorithm.w,
 
-    # Return simulation results dict for multi runner
-    return results
+        # ANC paths
+        "pir": primary_path,
+        "sir": secondary_path,
 
-def simulate_once(algorithm_name, L, mu, noise_source, noise_type,
-                    noise_wav_path, duration):
-    """Compatibility wrapper used by engine_multi.py (joblib grid runner)."""
-    # Single simulation run for multi runner
-    return run_anc_headless(algorithm_name, L, mu, noise_source,
-                                noise_type, noise_wav_path, duration)
+        # Signals after paths
+        "d": primary_stream,
+        "z": secondary_stream,
 
-def run_anc_capture(algorithm_name, L, mu, noise_source, noise_type,
-                    noise_wav_path, duration):
-    payload = {}
+        # Signals used for playback and saving
+        "before_raw": before_signal_raw,
+        "after_raw": after_signal_raw,
 
-    def _dummy_progress(_pct):
-        pass
+        # Simulation status
+        "divergence": bool(divergence)
+    }
 
-    def _capture(ref, noisy, err, tt, fs, exect, convt, ssedb,
-                 w0, wf, pir, sir, d_stream, z_stream,
-                 in_pow, out_pow, before_raw, after_raw, divergence=False):
-        payload.update(dict(
-            reference=ref,
-            noisy=noisy,
-            error=err,
-            t=tt,
-            fs=fs,
-            exec_time=exect,
-            conv_ms=convt,
-            sse_db=ssedb,
-            w0=w0,
-            wf=wf,
-            pir=pir,
-            sir=sir,
-            d=d_stream,
-            z=z_stream,
-            in_power=in_pow,
-            out_power=out_pow,
-            before_raw=before_raw,
-            after_raw=after_raw,
-            divergence=bool(divergence)
-        ))
-
-    run_anc(
-        algorithm_name,
-        int(L),
-        float(mu),
-        noise_source,
-        noise_type,
-        noise_wav_path,
-        float(duration),
-        _dummy_progress,
-        completion_callback=_capture,
-        metrics_callback=None
-    )
-
-    return payload
+    # Return complete result
+    return result
 
 def run_neural_anc_single(
     nn_checkpoint_path,
+    nn_backend,
     noise_source,
     noise_type,
     noise_wav_path,
     duration,
     start_time,
     progress_callback,
-    completion_callback=None,
-    metrics_callback=None
+    preloaded_noise=None,
+    paths=None
 ):
     # Run trained neural network controller for Single Run
 
     import torch
-    from neural.model import build_model
-    from neural.train import load_paths_as_tensors, causal_fir_filter
+    from neural.inference import load_inference_model, run_anc_inference
+    from neural.train import load_paths_as_tensors
+    from neural.preprocess import resample_if_needed
 
-    # Check checkpoint path
-    if not nn_checkpoint_path:
-        raise ValueError("Neural Network checkpoint path is empty")
+    # Load trained model
+    model, config, device = load_inference_model(nn_checkpoint_path, nn_backend)
 
-    # Select device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Load checkpoint
-    checkpoint = torch.load(
-        str(nn_checkpoint_path),
-        map_location=device
-    )
-
-    # Load model config from checkpoint
-    config = checkpoint.get("config", {})
+    # Read sampling rate
     fs = int(config.get("target_fs", 16000))
-
-    # Build model
-    model = build_model(config)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model = model.to(device)
-    model.eval()
 
     # Build signal length
     duration = float(duration)
@@ -436,14 +391,53 @@ def run_neural_anc_single(
     # Reference signal is zero
     reference_signal = np.zeros(N, dtype=np.float32)
 
-    # Generate or load noise
-    noise = _make_noise(
-        N=N,
-        fs=fs,
-        noise_source=noise_source,
-        noise_type=noise_type,
-        noise_wav_path=noise_wav_path
-    ).astype(np.float32)
+    # Generate noise for Single Run
+    if preloaded_noise is None:
+        noise = make_noise(
+            N=N,
+            fs=fs,
+            noise_source=noise_source,
+            noise_type=noise_type,
+            noise_wav_path=noise_wav_path
+        ).astype(np.float32)
+
+    # Use common Multi Run noise
+    else:
+        # Read original path sampling rate
+        source_fs = int(paths[0])
+
+        # Resample common noise to NN sampling rate
+        noise = resample_if_needed(
+            np.asarray(
+                preloaded_noise,
+                dtype=np.float32
+            ),
+            source_fs,
+            fs
+        )
+
+        # Match requested duration
+        if len(noise) >= N:
+            noise = noise[:N]
+        else:
+            repetitions = int(
+                np.ceil(
+                    N / max(1, len(noise))
+                )
+            )
+
+            noise = np.tile(
+                noise,
+                repetitions
+            )[:N]
+
+        # Normalize after resampling
+        noise = noise.astype(np.float32)
+
+        noise /= np.sqrt(
+            np.mean(noise ** 2)
+            + 1e-12
+        )
 
     # Input signal for neural controller
     noisy_signal = generate_noisy_signal(reference_signal, noise).astype(np.float32)
@@ -451,30 +445,31 @@ def run_neural_anc_single(
     # Convert input to torch tensor
     x = torch.from_numpy(noisy_signal).float().unsqueeze(0).to(device)
 
-    # Load primary and secondary paths at NN sampling rate
+    # Convert startup paths to tensors
     primary_path, secondary_path = load_paths_as_tensors(
+        paths=paths,
         device=device,
         target_fs=fs
     )
 
-    # Run neural controller
-    with torch.no_grad():
-        # Desired signal at error microphone
-        d = causal_fir_filter(x, primary_path)
+    # Run neural inference
+    signals = run_anc_inference(
+        model=model,
+        x=x,
+        primary_path=primary_path,
+        secondary_path=secondary_path,
+        backend=nn_backend,
+        config=config
+    )
 
-        # Controller output
-        y = model(x)
+    # Read desired signal
+    d = signals["d"]
 
-        # Anti-noise after secondary path
-        a = causal_fir_filter(y, secondary_path)
+    # Read secondary output
+    a = signals["a"]
 
-        # Match lengths
-        length = min(d.shape[1], a.shape[1])
-        d = d[:, :length]
-        a = a[:, :length]
-
-        # Residual error
-        e = d - a
+    # Read residual error
+    e = signals["e"]
 
     # Convert tensors to numpy
     primary_output_raw = d.squeeze(0).detach().cpu().numpy().astype(np.float32)
@@ -487,14 +482,11 @@ def run_neural_anc_single(
     noisy_signal = noisy_signal[:N]
     reference_signal = reference_signal[:N]
 
-    # Make sure progress reaches 100
-    try:
-        progress_callback(100)
-    except Exception:
-        pass
+    # Complete Neural Network progress
+    progress_callback(100)
 
     # Compute metrics
-    exec_time, conv_ms, sse_db, in_power, out_power = compute_metrics(
+    exec_time, _, sse_db, in_power, out_power = compute_metrics(
         start_time=start_time,
         error_signal=error_signal,
         noisy_signal=noisy_signal,
@@ -502,6 +494,8 @@ def run_neural_anc_single(
         N=N,
         anc_off_signal=primary_output_raw
     )
+
+    conv_ms = None
 
     # Compute additional metrics
     avg_pnc_dbr = compute_avg_pnc_dbr(primary_output_raw, noisy_signal)
@@ -518,39 +512,60 @@ def run_neural_anc_single(
     # Divergence flag
     divergence = False
 
-    # Send metrics if needed
-    if metrics_callback is not None:
-        metrics_callback(
-            fs=fs,
-            conv_ms=conv_ms,
-            sse_db=sse_db,
-            in_power=in_power,
-            out_power=out_power,
-            divergence=divergence,
-            avg_pnc_dbr=avg_pnc_dbr,
-            band_attenuation=band_attenuation
-        )
+    # Build complete Neural Network result
+    result = {
+        # Simulation settings
+        "algorithm": "Neural Network",
+        "L": 0,
+        "mu": 0.0,
+        "nn_backend": str(nn_backend),
 
-    # Send result to GUI
-    if completion_callback is not None:
-        completion_callback(
-            reference_signal,
-            noisy_signal,
-            error_signal,
-            t,
-            fs,
-            exec_time,
-            conv_ms,
-            sse_db,
-            initial_weights,
-            final_weights,
-            primary_ir,
-            secondary_ir,
-            primary_output_raw,
-            secondary_output_raw,
-            in_power,
-            out_power,
-            primary_output_raw,
-            error_signal,
-            divergence
-        )
+        # Noise settings
+        "source": noise_source,
+        "noise_label": noise_type,
+        "wav_path": (
+            noise_wav_path
+            if noise_source == "WAV"
+            else ""
+        ),
+
+        # Input and output signals
+        "reference": reference_signal,
+        "noisy": noisy_signal,
+        "error": error_signal,
+        "t": t,
+
+        # Sampling rate
+        "fs": int(fs),
+
+        # Performance metrics
+        "exec_time": float(exec_time),
+        "conv_ms": conv_ms,
+        "sse_db": sse_db,
+        "in_power": float(in_power),
+        "out_power": float(out_power),
+        "avg_pnc_dbr": float(avg_pnc_dbr),
+        "band_attenuation": band_attenuation,
+
+        # Neural Network has no adaptive weights
+        "w0": initial_weights,
+        "wf": final_weights,
+
+        # ANC paths
+        "pir": primary_ir,
+        "sir": secondary_ir,
+
+        # Signals after paths
+        "d": primary_output_raw,
+        "z": secondary_output_raw,
+
+        # Signals used for playback and saving
+        "before_raw": primary_output_raw,
+        "after_raw": error_signal,
+
+        # Simulation status
+        "divergence": bool(divergence)
+    }
+
+    # Return complete result
+    return result

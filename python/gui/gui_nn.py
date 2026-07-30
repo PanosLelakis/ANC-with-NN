@@ -7,8 +7,11 @@ from utils.time_utils import format_execution_time, estimate_eta
 from engine.engine_nn import (
     preprocess_dataset,
     start_training,
-    run_validation
+    run_validation,
+    export_onnx_model
 )
+from utils.plot import plot_training_history
+from neural.nn_logger import get_training_history_path
 
 def build_nn_ui(parent, state, default_font, header_font):
     # Widget references
@@ -28,27 +31,21 @@ def build_nn_ui(parent, state, default_font, header_font):
 def build_nn_callbacks(state, widgets):
     def select_dataset_root():
         # Select dataset folder
-        path = filedialog.askdirectory(
-            initialdir=state.nn_dataset_root_var.get() or "."
-        )
+        path = filedialog.askdirectory(initialdir=state.nn_dataset_root_var.get() or ".")
 
         if path:
             state.nn_dataset_root_var.set(path)
 
     def select_processed_root():
         # Select processed folder
-        path = filedialog.askdirectory(
-            initialdir=state.nn_processed_root_var.get() or "."
-        )
+        path = filedialog.askdirectory(initialdir=state.nn_processed_root_var.get() or ".")
 
         if path:
             state.nn_processed_root_var.set(path)
 
     def select_checkpoint():
         # Select checkpoint file
-        path = filedialog.askopenfilename(
-            filetypes=[("PyTorch checkpoints", "*.pt"), ("All files", "*.*")]
-        )
+        path = filedialog.askopenfilename(filetypes=[("PyTorch checkpoints", "*.pt"), ("All files", "*.*")])
 
         if path:
             state.nn_checkpoint_path_var.set(path)
@@ -76,7 +73,7 @@ def build_nn_callbacks(state, widgets):
                         text=estimate_eta(start_time, done, total)
                     )
 
-            state.root.after(0, ui_update)
+            state.ui_call(ui_update)
 
         def worker():
             # Run preprocessing
@@ -90,9 +87,7 @@ def build_nn_callbacks(state, widgets):
 
             def show_result():
                 # Show status
-                exec_label = format_execution_time(
-                    result.get("execution_time")
-                )
+                exec_label = format_execution_time(result.get("execution_time"))
 
                 widgets["progress_var"].set(100.0)
                 widgets["eta_label"].config(text=exec_label)
@@ -105,7 +100,7 @@ def build_nn_callbacks(state, widgets):
                 # Unlock UI
                 state.unlock_ui()
 
-            state.root.after(0, show_result)
+            state.ui_call(show_result)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -163,20 +158,19 @@ def build_nn_callbacks(state, widgets):
                         text=f"{float(val_loss):.8f}"
                     )
 
-            state.root.after(0, ui_update)
+            state.ui_call(ui_update)
 
         def worker():
             # Run training
             result = start_training(
                 config=config,
+                paths=state.anc_paths,
                 progress_callback=update_progress
             )
 
             def show_result():
                 # Show execution time
-                exec_label = format_execution_time(
-                    result.get("execution_time")
-                )
+                exec_label = format_execution_time(result.get("execution_time"))
 
                 widgets["eta_label"].config(text=exec_label)
 
@@ -195,21 +189,35 @@ def build_nn_callbacks(state, widgets):
                 # Unlock GUI
                 state.unlock_ui()
 
-            state.root.after(0, show_result)
+            state.ui_call(show_result)
 
         # Start training thread
         threading.Thread(target=worker, daemon=True).start()
 
     def run_validation_clicked():
-        # Validation request
-        result = run_validation(
-            checkpoint_path=state.nn_checkpoint_path_var.get(),
-            processed_root=state.nn_processed_root_var.get(),
+        # Read selected checkpoint
+        checkpoint_path = (
+            state.nn_checkpoint_path_var
+            .get()
+            .strip()
         )
 
-        exec_label = format_execution_time(
-            result.get("execution_time")
+        # Use default best checkpoint
+        if not checkpoint_path:
+            checkpoint_path = os.path.join(
+                state.nn_processed_root_var.get(),
+                "checkpoints",
+                "best.pt"
+            )
+
+        # Validation request
+        result = run_validation(
+            checkpoint_path=checkpoint_path,
+            processed_root=state.nn_processed_root_var.get(),
+            paths=state.anc_paths
         )
+
+        exec_label = format_execution_time(result.get("execution_time"))
 
         widgets["eta_label"].config(text=exec_label)
 
@@ -218,6 +226,81 @@ def build_nn_callbacks(state, widgets):
         else:
             widgets["status_label"].config(text=result["message"], fg="red")
 
+    def plot_training_history_clicked():
+        # Read training history path
+        history_path = (
+            get_training_history_path()
+        )
+
+        try:
+            # Plot training history
+            plot_training_history(
+                history_path
+            )
+
+            # Show plot status
+            widgets["status_label"].config(
+                text=(
+                    f"Training history loaded from: "
+                    f"{history_path}"
+                ),
+                fg="green"
+            )
+
+        except Exception as error:
+            # Show plot error
+            widgets["status_label"].config(
+                text=(
+                    f"Training history plot error: "
+                    f"{error}"
+                ),
+                fg="red"
+            )
+
+    def export_onnx_clicked():
+        # Read selected checkpoint
+        checkpoint_path = state.nn_checkpoint_path_var.get().strip()
+
+        # Use default best checkpoint
+        if not checkpoint_path:
+            checkpoint_path = os.path.join(
+                state.nn_processed_root_var.get(),
+                "checkpoints",
+                "best.pt"
+            )
+
+        # Reset progress
+        widgets["progress_var"].set(0.0)
+        widgets["status_label"].config(text="Exporting ONNX model...", fg="black")
+
+        # Lock GUI
+        state.lock_ui()
+
+        def worker():
+            # Export model
+            result = export_onnx_model(checkpoint_path)
+
+            def show_result():
+                # Show execution time
+                widgets["eta_label"].config(
+                    text=format_execution_time(result.get("execution_time"))
+                )
+
+                # Show result
+                if result["ok"]:
+                    widgets["progress_var"].set(100.0)
+                    widgets["status_label"].config(text=result["message"], fg="green")
+                else:
+                    widgets["status_label"].config(text=result["message"], fg="red")
+
+                # Unlock GUI
+                state.unlock_ui()
+
+            state.ui_call(show_result)
+
+        # Start export thread
+        threading.Thread(target=worker, daemon=True).start()
+
     return {
         "select_dataset_root": select_dataset_root,
         "select_processed_root": select_processed_root,
@@ -225,6 +308,8 @@ def build_nn_callbacks(state, widgets):
         "preprocess_clicked": preprocess_clicked,
         "start_training_clicked": start_training_clicked,
         "run_validation_clicked": run_validation_clicked,
+        "export_onnx_clicked": export_onnx_clicked,
+        "plot_training_history_clicked": plot_training_history_clicked
     }
 
 def build_nn_title(parent, header_font):
@@ -406,6 +491,20 @@ def build_training_frame(parent, state, default_font, callbacks):
         command=callbacks["start_training_clicked"]
     ).grid(row=2, column=0, columnspan=4, sticky="ew", pady=(4, 0))
 
+    tk.Button(
+        training_frame,
+        text="Plot Training & Validation Loss",
+        command=callbacks[
+            "plot_training_history_clicked"
+        ]
+    ).grid(
+        row=3,
+        column=0,
+        columnspan=4,
+        sticky="ew",
+        pady=(4, 0)
+    )
+
 def build_validation_frame(parent, state, default_font, widgets, callbacks):
     # Validation frame
     validation_frame = ttk.LabelFrame(parent, text="Validation")
@@ -434,6 +533,12 @@ def build_validation_frame(parent, state, default_font, widgets, callbacks):
         text="Run Validation",
         command=callbacks["run_validation_clicked"]
     ).grid(row=1, column=0, columnspan=3, sticky="ew")
+
+    tk.Button(
+        validation_frame,
+        text="Export ONNX",
+        command=callbacks["export_onnx_clicked"]
+    ).grid(row=2, column=0, columnspan=3, sticky="ew")
 
 def build_progress_frame(parent, default_font, widgets):
     # Progress frame

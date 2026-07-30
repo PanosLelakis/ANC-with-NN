@@ -33,7 +33,7 @@ def format_execution_time(execution_time):
     if execution_time is None:
         return "Execution time: --:--"
 
-    seconds = int(round(float(execution_time) * 60.0))
+    seconds = int(round(float(execution_time)))
 
     h = seconds // 3600
     m = (seconds % 3600) // 60

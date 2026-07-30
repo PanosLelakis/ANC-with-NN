@@ -381,8 +381,10 @@ def export_thesis_tables(results_dir="results", duration_s=None):
     # Save top-10 table.
     write_excel_csv(top10, os.path.join(results_dir, "top10_results.csv"))
 
-    # Divergence cases.
-    div_cases = non_divergent.copy()
+    # Select divergence cases
+    div_cases = valid[
+        valid["divergence"] == True
+    ].copy()
 
     # Save divergence cases table.
     write_excel_csv(div_cases, os.path.join(results_dir, "divergence_cases.csv"))

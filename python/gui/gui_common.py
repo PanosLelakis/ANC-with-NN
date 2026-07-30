@@ -5,6 +5,7 @@ import tkinter.font as tkfont
 from gui.gui_single import build_single_ui
 from gui.gui_multi import build_multi_ui
 from gui.gui_nn import build_nn_ui
+from engine.engine_common import load_paths
 
 class SharedState:
     """Holds shared Tk variables, references to widgets, and simulation data."""
@@ -18,6 +19,7 @@ class SharedState:
     nn_dataset_root_var: tk.StringVar = None
     nn_processed_root_var: tk.StringVar = None
     nn_checkpoint_path_var: tk.StringVar = None
+    nn_backend_var: tk.StringVar = None
 
     # NN training settings
     nn_target_fs_var: tk.StringVar = None
@@ -51,45 +53,24 @@ class SharedState:
     # Buttons list (for mass enabling/disabling)
     all_buttons = None
 
-    # Stored signals/state set by single-run completion
-    stored_reference_signal = None
-    stored_noisy_signal = None
-    stored_signal_after_primary = None
-    stored_signal_after_secondary = None
-    stored_error_signal = None
-    stored_t = None
-    stored_fs = 44100
-    stored_initial_weights = None
-    stored_final_weights = None
-    stored_primary_ir = None
-    stored_secondary_ir = None
-    stored_in_power = None
-    stored_out_power = None
+    # Last complete Single Run result
+    last_single_result = None
 
-    # Callbacks that multi panel may call
-    start_single_run_cb = None  # set by gui_single
+    # Normalized playback signals
+    play_before = None
+    play_after = None
 
-    # Best (mu, L) remembered by multi panel
-    best_mu = None
-    best_L = None
-
-    # Single-run timing
+    # Timings
     single_start_time = None
     eta_label = None
-
-    # Raw mic-level audio (before/after) for playback
-    stored_before_signal_raw = None
-    stored_after_signal_raw = None
-
-    stored_convergence_speed = None
-    stored_steady_state_error = None
-    stored_execution_time = None
-    stored_divergence = False
 
     # Links to other widgets
     wav_label_ref = None  # set by gui_single
 
     last_best_combo = None
+
+    # Preloaded ANC paths
+    anc_paths = None
 
 def build_and_run():
     import queue
@@ -141,6 +122,7 @@ def build_and_run():
     state.nn_dataset_root_var = tk.StringVar(value="python/dataset/dataset_1")
     state.nn_processed_root_var = tk.StringVar(value="python/dataset/processed")
     state.nn_checkpoint_path_var = tk.StringVar(value="")
+    state.nn_backend_var = tk.StringVar(value="PyTorch")
 
     # NN model defaults
     state.nn_conv_layers_var = tk.StringVar(value="2")
@@ -157,7 +139,10 @@ def build_and_run():
     state.nn_lr_var = tk.StringVar(value="0.001")
     state.nn_optimizer_var = tk.StringVar(value="AMSGrad")
 
-     # Build tab contents
+    # Load ANC paths once at startup
+    state.anc_paths = load_paths()
+
+    # Build tab contents
     build_single_ui(single_frame, state, default_font, header_font)
     build_multi_ui(multi_frame, state, default_font, header_font)
     build_nn_ui(nn_frame, state, default_font, header_font)

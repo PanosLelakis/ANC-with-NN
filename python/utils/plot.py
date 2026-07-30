@@ -1,9 +1,12 @@
 import threading
+import csv
+import os
 import numpy as np
 from scipy.signal import spectrogram
 from utils.smoothing import whittaker_eilers_smooth, smooth_fractional_octave_db#, sg_smooth, clamp_odd_window
-from utils.convert_to_db import val_to_dbr, val_to_db
+from utils.convert_to_db import val_to_dbr
 from utils.fft_transform import compute_fft
+from utils.performance_metrics import DEFAULT_BANDS, compute_band_attenuation
 
 PLOT_FORMAT = "pdf" # change noise_spectrogram extension in result_saver.py as well
 
@@ -448,36 +451,32 @@ def _band_edges_from_string(bands_str):
                 pass
     return bands
 
-def _band_powers(x, fs):
-    # last 20% steady-state
-    N = len(x); seg = x[int(0.8*N):]
-    # Hann to reduce leakage
-    win = np.hanning(len(seg))
-    seg = seg * win
-    X = np.fft.rfft(seg)
-    freqs = np.fft.rfftfreq(len(seg), 1.0/fs)
-    psd = (np.abs(X)**2) / (np.sum(win**2) + 1e-12)  # proportional; absolute scale cancels in ratios
-    return freqs, psd
-
 def plot_band_attenuation(d_signal, e_signal, fs, bands=None, bands_str="", save_dir=None,
                           algorithm_name="", mu=None, L=None, noise_type="",
                           convergence_time=None, steady_state_error=None):
-    if bands is None or len(bands) == 0:
+    # Read custom bands
+    if not bands:
+        # Parse text bands
         bands = _band_edges_from_string(bands_str)
-        if len(bands) == 0:
-            bands = [(0,500), (500,1000), (1000,3000), (3000,5000), (5000,10000), (10000,20000)]
 
-    f_d, P_d = _band_powers(d_signal, fs)
-    _, P_e = _band_powers(e_signal, fs)
-    att_db = []
-    labels = []
-    for (f1, f2) in bands:
-        idx = np.where((f_d >= f1) & (f_d < f2))[0]
-        Pd = np.sum(P_d[idx]) + 1e-12
-        Pe = np.sum(P_e[idx]) + 1e-12
-        # negative values mean improvement
-        att_db.append(10.0 * np.log10(Pe / Pd))
-        labels.append(f"{int(f1)}-{int(f2)}")
+    # Use default bands when text is empty
+    if not bands:
+        # Read common default bands
+        bands = DEFAULT_BANDS
+
+    # Compute attenuation once
+    attenuation = compute_band_attenuation(
+        d_signal=d_signal,
+        e_signal=e_signal,
+        fs=fs,
+        bands=bands
+    )
+
+    # Read band labels
+    labels = list(attenuation.keys())
+
+    # Read attenuation values
+    att_db = list(attenuation.values())
 
     fig1, plt = _new_fig(headless=bool(save_dir))
     figure_title_metadata(fig1, algorithm_name, mu, L, noise_type,
@@ -624,3 +623,199 @@ def plot_noise_spectrogram(signal, fs, save_dir=None):
 
 def plot_error_spectrogram(signal, fs, save_dir=None):
     return plot_spectrogram(signal, fs, title="Error Spectrogram", out_name="error_spectrogram.png", save_dir=save_dir, xlim=1)
+
+def read_training_history(history_path):
+    # Check history file
+    history_path = os.fspath(history_path)
+
+    if not os.path.exists(history_path):
+        raise FileNotFoundError(
+            f"Training history not found: "
+            f"{history_path}"
+        )
+
+    # Read training history
+    with open(
+        history_path,
+        "r",
+        encoding="utf-8-sig",
+        newline=""
+    ) as file:
+        first_line = file.readline()
+
+        # Skip Excel separator row
+        if not first_line.lower().startswith("sep="):
+            file.seek(0)
+
+        reader = csv.DictReader(file)
+        rows = list(reader)
+
+    # Stop when history is empty
+    if not rows:
+        raise RuntimeError(
+            "Training history is empty"
+        )
+
+    # Convert history columns
+    epochs = np.array(
+        [
+            int(row["epoch"])
+            for row in rows
+        ],
+        dtype=int
+    )
+
+    training_loss = np.array(
+        [
+            float(row["training_loss"])
+            for row in rows
+        ],
+        dtype=float
+    )
+
+    validation_loss = np.array(
+        [
+            float(row["validation_loss"])
+            for row in rows
+        ],
+        dtype=float
+    )
+
+    # Return history values
+    return (
+        epochs,
+        training_loss,
+        validation_loss
+    )
+
+def annotate_best_validation_loss(
+    axis,
+    epochs,
+    validation_loss
+):
+    # Check available values
+    if (
+        len(epochs) == 0
+        or len(validation_loss) == 0
+    ):
+        return
+
+    # Find best validation epoch
+    best_index = int(
+        np.nanargmin(validation_loss)
+    )
+
+    best_epoch = int(
+        epochs[best_index]
+    )
+
+    best_loss = float(
+        validation_loss[best_index]
+    )
+
+    # Draw best point
+    axis.plot(
+        [best_epoch],
+        [best_loss],
+        marker="o",
+        markersize=7,
+        color="k",
+        antialiased=True
+    )
+
+def plot_training_history(
+    history_path,
+    save_dir=None
+):
+    # Read training history
+    (
+        epochs,
+        training_loss,
+        validation_loss
+    ) = read_training_history(
+        history_path
+    )
+
+    # Create figure
+    figure, pyplot = _new_fig(
+        headless=bool(save_dir),
+        figsize=(10.5, 6.0),
+        dpi=120
+    )
+
+    # Plot losses
+    axis = figure.gca()
+
+    axis.plot(
+        epochs,
+        training_loss,
+        marker="o",
+        linewidth=1.8,
+        markersize=4,
+        label="Training loss",
+        antialiased=True
+    )
+
+    axis.plot(
+        epochs,
+        validation_loss,
+        marker="o",
+        linewidth=1.8,
+        markersize=4,
+        label="Validation loss",
+        antialiased=True
+    )
+
+    # Annotate best validation point
+    annotate_best_validation_loss(
+        axis,
+        epochs,
+        validation_loss
+    )
+
+    # Build safe x-axis limits
+    if len(epochs) == 1:
+        xlim_left = (
+            float(epochs[0])
+            - 0.5
+        )
+        xlim_right = (
+            float(epochs[0])
+            + 0.5
+        )
+    else:
+        xlim_left = float(epochs[0])
+        xlim_right = float(epochs[-1])
+
+    # Format figure
+    beautify_plot(
+        axis,
+        "Training & Validation Loss",
+        "Epoch",
+        "Mean Squared Error",
+        xlim_left,
+        xlim_right,
+        0.0,
+        None
+    )
+
+    # Remove legend frame
+    legend = axis.get_legend()
+
+    if legend is not None:
+        legend.set_frame_on(False)
+
+    # Save plot
+    if save_dir:
+        save_plot(
+            figure,
+            save_dir,
+            "training_validation_loss.png"
+        )
+
+    # Show or dispose figure
+    dispose_fig(
+        figure,
+        pyplot,
+        save_dir
+    )
