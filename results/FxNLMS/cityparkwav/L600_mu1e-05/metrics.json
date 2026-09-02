@@ -1,0 +1,14 @@
+{
+  "algorithm": "FxNLMS",
+  "L": 600,
+  "mu": 1e-05,
+  "noise_label": "citypark.wav",
+  "fs": 48000,
+  "exec_time": 42.39,
+  "conv_ms": 0.0,
+  "sse_db": -12.92,
+  "in_power": 0.312,
+  "out_power": 0.182,
+  "divergence": false,
+  "status": "ok"
+}

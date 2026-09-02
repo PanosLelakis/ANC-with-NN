@@ -1,0 +1,14 @@
+{
+  "algorithm": "FxNLMS",
+  "L": 50,
+  "mu": 0.05,
+  "noise_label": "airplaneinterior.wav",
+  "fs": 48000,
+  "exec_time": 1.94,
+  "conv_ms": 0.0,
+  "sse_db": 35.96,
+  "in_power": 0.389,
+  "out_power": 3945.498,
+  "divergence": true,
+  "status": "diverged"
+}

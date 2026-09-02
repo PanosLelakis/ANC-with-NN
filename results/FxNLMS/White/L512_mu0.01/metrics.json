@@ -1,0 +1,17 @@
+{
+  "algorithm": "FxNLMS",
+  "L": 512,
+  "mu": 0.01,
+  "noise_source": "Stationary",
+  "noise_label": "White",
+  "fs": 48000,
+  "exec_time": 7.54,
+  "conv_ms": 1395.29,
+  "sse_db": -26.05,
+  "in_power": 0.017,
+  "out_power": 0.009,
+  "attenuation_db": -2.93,
+  "divergence": false,
+  "status": "ok",
+  "save_path": "C:\\Users\\Panos\\OneDrive\\Documents\\University\\ANC-with-NN\\results\\FxNLMS\\White\\L512_mu0.01"
+}

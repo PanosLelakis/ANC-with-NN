@@ -1,0 +1,20 @@
+\begin{xltabular}{\textwidth}{%
+    >{\RaggedRight\arraybackslash\bfseries}p{0.14\textwidth}
+    Y Y Y Y Y Y
+}
+\caption{Ενδεικτικό λειτουργικό εύρος και απόδοση των αλγορίθμων στο Multi Run.}
+\label{tab:algorithm_performance_range}\\
+
+\toprule
+\textbf{Algorithm} & \textbf{$\mu$} & \textbf{$L$} & \textbf{Conv. Speed (ms)} & \textbf{SSE (dBr)} & \textbf{Score} & \textbf{Case} \\
+\midrule
+\endfirsthead
+
+\toprule
+\textbf{Algorithm} & \textbf{$\mu$} & \textbf{$L$} & \textbf{Conv. Speed (ms)} & \textbf{SSE (dBr)} & \textbf{Score} & \textbf{Case} \\
+\midrule
+\endhead
+
+
+\bottomrule
+\end{xltabular}

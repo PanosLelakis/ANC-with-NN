@@ -1,0 +1,14 @@
+{
+  "algorithm": "FxNLMS",
+  "L": 10,
+  "mu": 0.05,
+  "noise_label": "White",
+  "fs": 48000,
+  "exec_time": 79.26,
+  "conv_ms": 117.65,
+  "sse_db": -21.65,
+  "in_power": 0.017,
+  "out_power": 0.046,
+  "divergence": false,
+  "status": "ok"
+}

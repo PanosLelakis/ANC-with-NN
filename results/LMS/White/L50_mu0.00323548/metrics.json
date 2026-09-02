@@ -1,0 +1,17 @@
+{
+  "algorithm": "LMS",
+  "L": 50,
+  "mu": 0.0032354838709677423,
+  "noise_source": "Stationary",
+  "noise_label": "White",
+  "fs": 48000,
+  "exec_time": 14.24,
+  "conv_ms": 251.44,
+  "sse_db": -31.81,
+  "in_power": 0.017,
+  "out_power": 0.002,
+  "attenuation_db": -8.58,
+  "divergence": false,
+  "status": "ok",
+  "save_path": "C:\\Users\\plela\\OneDrive\\Documents\\University\\ANC-with-NN\\results\\LMS\\White\\L50_mu0.00323548"
+}

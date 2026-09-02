@@ -1,0 +1,17 @@
+{
+  "algorithm": "Neural Network",
+  "L": 0,
+  "mu": 0.0,
+  "noise_source": "Stationary",
+  "noise_label": "White",
+  "fs": 16000,
+  "exec_time": 2.14,
+  "conv_ms": null,
+  "sse_db": -26.9,
+  "in_power": 0.004,
+  "out_power": 0.007,
+  "attenuation_db": 2.35,
+  "divergence": false,
+  "status": "ok",
+  "save_path": "C:\\Users\\Panos\\OneDrive\\Documents\\University\\ANC-with-NN\\results\\Neural Network\\White\\L0_mu0"
+}
