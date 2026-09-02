@@ -19,7 +19,7 @@ def _finite_view(x):
     return x[mask].astype(float)
 
 def compute_convergence_time(error, fs, sse_db, improvement_ratio=0.80,
-                             start_ms=5.0, stable_ms=0, min_start_ms=20.0, tail_guard_ms=10.0):
+                             start_ms=5.0, stable_ms=0, min_start_ms=20.0):
     """
     Convergence time based on % improvement from start level to steady-state level.
 
@@ -62,8 +62,6 @@ def compute_convergence_time(error, fs, sse_db, improvement_ratio=0.80,
             run += 1
             if run >= stable_len:
                 first_idx = i - stable_len + 1
-                #guard = int(round((tail_guard_ms / 1000.0) * fs))
-                #idx = min(first_idx + guard, err.size - 1)
                 return 1000.0 * (first_idx / fs)
         else:
             run = 0

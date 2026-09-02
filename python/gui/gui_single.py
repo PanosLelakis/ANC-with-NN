@@ -62,8 +62,9 @@ def build_single_ui(parent, state, default_font, header_font):
         state.last_single_result = None
 
         # Clear playback signals
-        state.play_before = None
-        state.play_after = None
+        state.play_input = None
+        state.play_anc_off = None
+        state.play_anc_on = None
 
         # Disable result actions
         set_result_buttons(False)
@@ -93,11 +94,71 @@ def build_single_ui(parent, state, default_font, header_font):
         state.mu_entry.config(state=tk.DISABLED if is_neural else tk.NORMAL)
 
         # Update backend field
-        backend_menu.config(state="readonly" if is_neural else tk.DISABLED)
+        backend_menu.config(
+            state=(
+                "readonly"
+                if is_neural
+                else tk.DISABLED
+            )
+        )
+
+        # Update model button
+        model_btn.config(
+            state=(
+                tk.NORMAL
+                if is_neural
+                else tk.DISABLED
+            )
+        )
 
         # Refresh Start button
         validate_single_ready()
     
+    def select_model_file():
+        # Read current model path
+        current_path = (
+            state.single_nn_checkpoint_path_var
+            .get()
+            .strip()
+        )
+
+        # Select starting folder
+        initial_dir = (
+            os.path.dirname(current_path)
+            if current_path
+            else os.path.join(
+                os.getcwd(),
+                "models"
+            )
+        )
+
+        # Open checkpoint selector
+        path = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            filetypes=[
+                (
+                    "PyTorch checkpoints",
+                    "*.pt"
+                ),
+                (
+                    "All files",
+                    "*.*"
+                )
+            ]
+        )
+
+        # Stop when no file is selected
+        if not path:
+            return
+
+        # Store selected checkpoint
+        state.single_nn_checkpoint_path_var.set(
+            path
+        )
+
+        # Refresh Start button
+        validate_single_ready()
+
     def select_wav_file():
         path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
         
@@ -117,6 +178,59 @@ def build_single_ui(parent, state, default_font, header_font):
             wav_label.config(text=path.split("/")[-1])
             state.status_label.config(text="WAV selected. Press Start to run.", fg="black")
         
+        validate_single_ready()
+
+    def select_model_file():
+        # Read current model
+        current_path = (
+            state.single_nn_checkpoint_path_var
+            .get()
+            .strip()
+        )
+
+        # Select initial folder
+        initial_dir = (
+            os.path.dirname(current_path)
+            if current_path
+            else os.path.join(
+                os.getcwd(),
+                "models"
+            )
+        )
+
+        # Select checkpoint
+        path = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            filetypes=[
+                (
+                    "PyTorch checkpoints",
+                    "*.pt"
+                ),
+                (
+                    "All files",
+                    "*.*"
+                )
+            ]
+        )
+
+        # Stop after cancellation
+        if not path:
+            return
+
+        # Store checkpoint
+        state.single_nn_checkpoint_path_var.set(
+            path
+        )
+
+        # Show selected model
+        model_label.config(
+            text=(
+                f"{os.path.basename(os.path.dirname(path))}/"
+                f"{os.path.basename(path)}"
+            )
+        )
+
+        # Refresh Start button
         validate_single_ready()
 
     def on_anc_complete(result):
@@ -149,16 +263,55 @@ def build_single_ui(parent, state, default_font, header_font):
         state.progress_bar.update_idletasks()
 
         # Read playback signals
-        before = np.nan_to_num(result["before_raw"], nan=0.0, posinf=0.0, neginf=0.0)
-        after = np.nan_to_num(result["after_raw"], nan=0.0, posinf=0.0, neginf=0.0)
+        input_signal = np.nan_to_num(
+            result["noisy"],
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0
+        )
 
-        # Use equal playback scale
-        max_abs = max(float(np.max(np.abs(before))), float(np.max(np.abs(after))), 1e-6)
+        anc_off = np.nan_to_num(
+            result["before_raw"],
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0
+        )
+
+        anc_on = np.nan_to_num(
+            result["after_raw"],
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0
+        )
+
+        # Use the same playback scale for fair comparison
+        max_abs = max(
+            float(np.max(np.abs(input_signal))),
+            float(np.max(np.abs(anc_off))),
+            float(np.max(np.abs(anc_on))),
+            1e-6
+        )
+
         scale = min(1.0, 0.99 / max_abs)
 
         # Store playback signals
-        state.play_before = np.clip(before * scale, -1.0, 1.0).astype(np.float32)
-        state.play_after = np.clip(after * scale, -1.0, 1.0).astype(np.float32)
+        state.play_input = np.clip(
+            input_signal * scale,
+            -1.0,
+            1.0
+        ).astype(np.float32)
+
+        state.play_anc_off = np.clip(
+            anc_off * scale,
+            -1.0,
+            1.0
+        ).astype(np.float32)
+
+        state.play_anc_on = np.clip(
+            anc_on * scale,
+            -1.0,
+            1.0
+        ).astype(np.float32)
 
         # Log simulation
         log_case(
@@ -223,23 +376,23 @@ def build_single_ui(parent, state, default_font, header_font):
             L = 0
             mu = 0.0
 
-            # Read selected checkpoint
-            nn_checkpoint_path = state.nn_checkpoint_path_var.get().strip()
+                        # Read selected checkpoint
+            nn_checkpoint_path = (
+                state.single_nn_checkpoint_path_var
+                .get()
+                .strip()
+            )
 
-            # Use default checkpoint
+            # Require selected model
             if not nn_checkpoint_path:
-                nn_checkpoint_path = os.path.join(
-                    state.nn_processed_root_var.get(),
-                    "checkpoints",
-                    "best.pt"
-                )
-
-            # Check PyTorch checkpoint
-            if not os.path.exists(nn_checkpoint_path):
                 state.status_label.config(
-                    text=f"Checkpoint not found: {nn_checkpoint_path}",
+                    text=(
+                        "Select a Neural Network "
+                        "model first."
+                    ),
                     fg="red"
                 )
+
                 return
 
             # Check ONNX model
@@ -325,6 +478,15 @@ def build_single_ui(parent, state, default_font, header_font):
             return
         
         ok = True
+
+        # Require model for Neural Network
+        if state.algo_var.get() == "Neural Network":
+            ok &= bool(
+                state.single_nn_checkpoint_path_var
+                .get()
+                .strip()
+            )
+
         # Algorithm must be selected
         ok &= bool(state.algo_var.get())
         # Numeric fields
@@ -371,6 +533,14 @@ def build_single_ui(parent, state, default_font, header_font):
                 # Mark invalid input
                 ok = False
 
+        # Require model for Neural Network
+        if state.algo_var.get() == "Neural Network":
+            ok &= bool(
+                state.single_nn_checkpoint_path_var
+                .get()
+                .strip()
+            )
+
         # WAV path required if WAV chosen
         if state.noise_source_var.get() == "WAV":
             ok &= bool(state.wav_file_path.get().strip())
@@ -394,10 +564,23 @@ def build_single_ui(parent, state, default_font, header_font):
         nonlocal is_playing
 
         is_playing = False
-        play_before_btn.config(state=tk.NORMAL, text="Play Input")
-        play_after_btn.config(state=tk.NORMAL, text="Play Output")
 
-    def toggle_play_before():
+        play_input_btn.config(
+            state=tk.NORMAL,
+            text="Play Input"
+        )
+
+        play_anc_off_btn.config(
+            state=tk.NORMAL,
+            text="Play ANC OFF"
+        )
+
+        play_anc_on_btn.config(
+            state=tk.NORMAL,
+            text="Play ANC ON"
+        )
+
+    def toggle_play(button, audio_data):
         nonlocal is_playing, play_token
 
         if is_playing:
@@ -412,30 +595,27 @@ def build_single_ui(parent, state, default_font, header_font):
         play_token += 1
         token = play_token
 
-        play_before_btn.config(text="Stop playing", state=tk.NORMAL)
-        state.lock_ui(allow_widgets=(play_before_btn,))
-        play_audio(state.play_before, sample_rate=int(state.last_single_result["fs"]))
-        state.root.after(50, _poll_playback, token)
+        button.config(
+            text="Stop playing",
+            state=tk.NORMAL
+        )
 
-    def toggle_play_after():
-        nonlocal is_playing, play_token
+        state.lock_ui(
+            allow_widgets=(button,)
+        )
 
-        if is_playing:
-            play_token += 1
-            stop_audio()
-            is_playing = False
-            reset_play_buttons()
-            state.unlock_ui()
-            return
+        play_audio(
+            audio_data,
+            sample_rate=int(
+                state.last_single_result["fs"]
+            )
+        )
 
-        is_playing = True
-        play_token += 1
-        token = play_token
-
-        play_after_btn.config(text="Stop playing", state=tk.NORMAL)
-        state.lock_ui(allow_widgets=(play_after_btn,))
-        play_audio(state.play_after, sample_rate=int(state.last_single_result["fs"]))
-        state.root.after(50, _poll_playback, token)
+        state.root.after(
+            50,
+            _poll_playback,
+            token
+        )
 
     def plot_metadata(result, save_dir):
         # Return common plot metadata
@@ -578,156 +758,967 @@ def build_single_ui(parent, state, default_font, header_font):
             daemon=True
         ).start()
     
-    # ---------------- UI ----------------
-    # Title
-    tk.Label(parent, text="Single Run", font=header_font).grid(row=0, column=0, columnspan=2, sticky="w")
+        # ---------------- UI ----------------
 
-    # Algorithm
-    algorithm_frame = tk.Frame(parent)
-    algorithm_frame.grid(row=1, column=1, sticky="w")
+    # Build title
+    tk.Label(
+        parent,
+        text="Single Run",
+        font=header_font
+    ).grid(
+        row=0,
+        column=0,
+        columnspan=2,
+        sticky="w"
+    )
 
+    # Build parameters frame
+    parameters_frame = ttk.LabelFrame(
+        parent,
+        text="Parameters"
+    )
+
+    parameters_frame.grid(
+        row=1,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Expand value column
+    parameters_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
+
+    # Add Algorithm label
+    tk.Label(
+        parameters_frame,
+        text="Algorithm:",
+        font=default_font
+    ).grid(
+        row=0,
+        column=0,
+        sticky="e"
+    )
+
+    # Build algorithm row
+    algorithm_frame = tk.Frame(
+        parameters_frame
+    )
+
+    algorithm_frame.grid(
+        row=0,
+        column=1,
+        sticky="w"
+    )
+
+    # Build algorithm menu
     algo_menu = ttk.Combobox(
         algorithm_frame,
         textvariable=state.algo_var,
-        values=["LMS", "NLMS", "FxLMS", "FxNLMS", "Neural Network"],
+        values=[
+            "LMS",
+            "NLMS",
+            "FxLMS",
+            "FxNLMS",
+            "Neural Network"
+        ],
         state="readonly",
-        width=12
+        width=15
     )
-    algo_menu.pack(side="left")
-    algo_menu.bind("<<ComboboxSelected>>", on_algorithm_change)
 
-    # NN Backend
-    tk.Label(algorithm_frame, text="NN Backend:", font=default_font).pack(side="left", padx=(10, 2))
+    algo_menu.pack(
+        side="left"
+    )
 
+    # Handle algorithm selection
+    algo_menu.bind(
+        "<<ComboboxSelected>>",
+        on_algorithm_change
+    )
+
+    # Add backend label
+    tk.Label(
+        algorithm_frame,
+        text="NN Backend:",
+        font=default_font
+    ).pack(
+        side="left",
+        padx=(10, 2)
+    )
+
+    # Build backend menu
     backend_menu = ttk.Combobox(
         algorithm_frame,
         textvariable=state.nn_backend_var,
-        values=["PyTorch", "ONNX"],
+        values=[
+            "PyTorch",
+            "ONNX"
+        ],
         state=tk.DISABLED,
         width=8
     )
-    backend_menu.pack(side="left")
 
-    # μ first (row=2)
-    tk.Label(parent, text="μ:", font=default_font).grid(row=2, column=0, sticky="e")
-    state.mu_entry = tk.Entry(parent, width=10)
-    state.mu_entry.grid(row=2, column=1, sticky="w")
-    state.mu_entry.bind("<KeyRelease>", validate_single_ready)
+    backend_menu.pack(
+        side="left"
+    )
 
-    # L next (row=3)
-    tk.Label(parent, text="L (taps):", font=default_font).grid(row=3, column=0, sticky="e")
-    state.L_entry = tk.Entry(parent, width=10)
-    state.L_entry.grid(row=3, column=1, sticky="w")
-    state.L_entry.bind("<KeyRelease>", validate_single_ready)
+    # Add model label
+    tk.Label(
+        parameters_frame,
+        text="NN Model:",
+        font=default_font
+    ).grid(
+        row=1,
+        column=0,
+        sticky="e"
+    )
 
-    # Duration (row=4)
-    tk.Label(parent, text="Duration (sec):", font=default_font).grid(row=4, column=0, sticky="e")
-    state.duration_entry = tk.Entry(parent, width=10)
-    state.duration_entry.grid(row=4, column=1, sticky="w")
-    state.duration_entry.bind("<KeyRelease>", validate_single_ready)
+    # Build model row
+    model_frame = tk.Frame(
+        parameters_frame
+    )
 
-    tk.Label(parent, text="Noise Source:", font=default_font).grid(row=5, column=0, sticky="e")
-    src_frame = tk.Frame(parent); src_frame.grid(row=5, column=1, sticky="w")
-    tk.Radiobutton(src_frame, text="Stationary", variable=state.noise_source_var, value="Stationary",
-                   command=on_noise_source_change).pack(side="left")
-    tk.Radiobutton(src_frame, text="WAV", variable=state.noise_source_var, value="WAV",
-                   command=on_noise_source_change).pack(side="left")
+    model_frame.grid(
+        row=1,
+        column=1,
+        sticky="ew"
+    )
 
-    tk.Label(parent, text="Noise Type:", font=default_font).grid(row=6, column=0, sticky="e")
-    noise_menu = ttk.Combobox(parent, textvariable=state.noise_var,
-                              values=["White","Pink","Brownian","Violet","Grey","Blue"],
-                              state="readonly", width=12)
-    noise_menu.grid(row=6, column=1, sticky="w")
-    noise_menu.bind("<<ComboboxSelected>>", validate_single_ready)
+    # Expand model path
+    model_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
 
-    tk.Label(parent, text="Noise WAV:", font=default_font).grid(row=7, column=0, sticky="e")
-    wav_select_frame = tk.Frame(parent)
-    wav_select_frame.grid(row=7, column=1, columnspan=2, sticky="ew")
-    wav_btn = tk.Button(wav_select_frame, text="Select WAV", command=select_wav_file, state=tk.DISABLED)
-    wav_btn.grid(row=0, column=0, sticky="w")
-    wav_label = tk.Label(wav_select_frame, text="No file selected", font=default_font)
-    wav_label.grid(row=0, column=1, sticky="w")
+    # Build model button
+    model_btn = tk.Button(
+        model_frame,
+        text="Select Model",
+        command=select_model_file,
+        state=tk.DISABLED
+    )
+
+    model_btn.grid(
+        row=0,
+        column=0,
+        sticky="w"
+    )
+
+    # Show selected model path
+    model_label = tk.Label(
+        model_frame,
+        textvariable=(
+            state.single_nn_checkpoint_path_var
+        ),
+        font=default_font,
+        anchor="w",
+        wraplength=500
+    )
+
+    model_label.grid(
+        row=0,
+        column=1,
+        sticky="ew",
+        padx=(5, 0)
+    )
+
+    # Add step-size label
+    tk.Label(
+        parameters_frame,
+        text="μ:",
+        font=default_font
+    ).grid(
+        row=2,
+        column=0,
+        sticky="e"
+    )
+
+    # Build step-size entry
+    state.mu_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    state.mu_entry.grid(
+        row=2,
+        column=1,
+        sticky="w"
+    )
+
+    state.mu_entry.bind(
+        "<KeyRelease>",
+        validate_single_ready
+    )
+
+    # Add filter-length label
+    tk.Label(
+        parameters_frame,
+        text="L (taps):",
+        font=default_font
+    ).grid(
+        row=3,
+        column=0,
+        sticky="e"
+    )
+
+    # Build filter-length entry
+    state.L_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    state.L_entry.grid(
+        row=3,
+        column=1,
+        sticky="w"
+    )
+
+    state.L_entry.bind(
+        "<KeyRelease>",
+        validate_single_ready
+    )
+
+    # Add duration label
+    tk.Label(
+        parameters_frame,
+        text="Duration (sec):",
+        font=default_font
+    ).grid(
+        row=4,
+        column=0,
+        sticky="e"
+    )
+
+    # Build duration entry
+    state.duration_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    state.duration_entry.grid(
+        row=4,
+        column=1,
+        sticky="w"
+    )
+
+    state.duration_entry.bind(
+        "<KeyRelease>",
+        validate_single_ready
+    )
+
+    # Add source label
+    tk.Label(
+        parameters_frame,
+        text="Noise Source:",
+        font=default_font
+    ).grid(
+        row=5,
+        column=0,
+        sticky="e"
+    )
+
+    # Build source row
+    source_frame = tk.Frame(
+        parameters_frame
+    )
+
+    source_frame.grid(
+        row=5,
+        column=1,
+        sticky="w"
+    )
+
+    # Build stationary option
+    tk.Radiobutton(
+        source_frame,
+        text="Stationary",
+        variable=state.noise_source_var,
+        value="Stationary",
+        command=on_noise_source_change
+    ).pack(
+        side="left"
+    )
+
+    # Build WAV option
+    tk.Radiobutton(
+        source_frame,
+        text="WAV",
+        variable=state.noise_source_var,
+        value="WAV",
+        command=on_noise_source_change
+    ).pack(
+        side="left"
+    )
+
+    # Add noise-type label
+    tk.Label(
+        parameters_frame,
+        text="Noise Type:",
+        font=default_font
+    ).grid(
+        row=6,
+        column=0,
+        sticky="e"
+    )
+
+    # Build noise-type menu
+    noise_menu = ttk.Combobox(
+        parameters_frame,
+        textvariable=state.noise_var,
+        values=[
+            "White",
+            "Pink",
+            "Brownian",
+            "Violet",
+            "Grey",
+            "Blue"
+        ],
+        state="readonly",
+        width=12
+    )
+
+    noise_menu.grid(
+        row=6,
+        column=1,
+        sticky="w"
+    )
+
+    noise_menu.bind(
+        "<<ComboboxSelected>>",
+        validate_single_ready
+    )
+
+    # Add WAV label
+    tk.Label(
+        parameters_frame,
+        text="Noise WAV:",
+        font=default_font
+    ).grid(
+        row=7,
+        column=0,
+        sticky="e"
+    )
+
+    # Build WAV row
+    wav_select_frame = tk.Frame(
+        parameters_frame
+    )
+
+    wav_select_frame.grid(
+        row=7,
+        column=1,
+        sticky="ew"
+    )
+
+    # Expand WAV filename
+    wav_select_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
+
+    # Build WAV button
+    wav_btn = tk.Button(
+        wav_select_frame,
+        text="Select WAV",
+        command=select_wav_file,
+        state=tk.DISABLED
+    )
+
+    wav_btn.grid(
+        row=0,
+        column=0,
+        sticky="w"
+    )
+
+    # Show selected WAV
+    wav_label = tk.Label(
+        wav_select_frame,
+        text="No file selected",
+        font=default_font,
+        anchor="w"
+    )
+
+    wav_label.grid(
+        row=0,
+        column=1,
+        sticky="ew",
+        padx=(5, 0)
+    )
+
+    # Store WAV label reference
     state.wav_label_ref = wav_label
 
-    start_btn = tk.Button(parent, text="Start", command=start_algorithm, state=tk.DISABLED)
-    start_btn.grid(row=8, column=0, columnspan=2, sticky="ew")
+    # Build Start button
+    start_btn = tk.Button(
+        parameters_frame,
+        text="Start",
+        command=start_algorithm,
+        state=tk.DISABLED
+    )
 
-    state.progress_var = tk.DoubleVar(value=0.0)
-    state.progress_bar = ttk.Progressbar(parent, maximum=100.0, variable=state.progress_var)
-    state.progress_bar.grid(row=9, column=0, columnspan=2, sticky="ew")
+    start_btn.grid(
+        row=8,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        pady=(5, 0)
+    )
 
-    state.eta_label = tk.Label(parent, text="ETA --:--", font=default_font, anchor="w")
-    state.eta_label.grid(row=10, column=0, columnspan=2, sticky="w")
+    # Build progress frame
+    progress_frame = ttk.LabelFrame(
+        parent,
+        text="Progress"
+    )
 
-    state.status_label = tk.Label(parent, text="", font=default_font, anchor="w")
-    state.status_label.grid(row=11, column=0, columnspan=2, sticky="w")
+    progress_frame.grid(
+        row=2,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
 
-    tk.Label(parent, text="Execution time (sec):", font=default_font).grid(row=12, column=0, sticky="e")
-    exec_val = tk.Label(parent, text="-", font=default_font)
-    exec_val.grid(row=12, column=1, sticky="w")
+    # Expand progress frame
+    progress_frame.grid_columnconfigure(
+        0,
+        weight=1
+    )
 
-    tk.Label(parent, text="Convergence speed (msec):", font=default_font).grid(row=13, column=0, sticky="e")
-    conv_val = tk.Label(parent, text="-", font=default_font); conv_val.grid(row=13, column=1, sticky="w")
+    # Build progress value
+    state.progress_var = tk.DoubleVar(
+        value=0.0
+    )
 
-    tk.Label(parent, text="Steady state error (dBr):", font=default_font).grid(row=14, column=0, sticky="e")
-    sse_val = tk.Label(parent, text="-", font=default_font); sse_val.grid(row=14, column=1, sticky="w")
+    # Build progress bar
+    state.progress_bar = ttk.Progressbar(
+        progress_frame,
+        maximum=100.0,
+        variable=state.progress_var
+    )
 
-    tk.Label(parent, text="Power (ANC OFF):", font=default_font).grid(row=15, column=0, sticky="e")
-    inpow_val = tk.Label(parent, text="-", font=default_font); inpow_val.grid(row=15, column=1, sticky="w")
+    state.progress_bar.grid(
+        row=0,
+        column=0,
+        sticky="ew"
+    )
 
-    tk.Label(parent, text="Power (ANC ON):", font=default_font).grid(row=16, column=0, sticky="e")
-    outpow_val = tk.Label(parent, text="-", font=default_font); outpow_val.grid(row=16, column=1, sticky="w")
+    # Build ETA label
+    state.eta_label = tk.Label(
+        progress_frame,
+        text="ETA --:--",
+        font=default_font,
+        anchor="w"
+    )
 
-    play_before_btn = tk.Button(parent, text="Play Input", command=toggle_play_before, state=tk.DISABLED)
-    play_before_btn.grid(row=17, column=0, sticky="ew")
+    state.eta_label.grid(
+        row=1,
+        column=0,
+        sticky="w"
+    )
 
-    play_after_btn = tk.Button(parent, text="Play Output", command=toggle_play_after, state=tk.DISABLED)
-    play_after_btn.grid(row=17, column=1, sticky="ew")
+    # Build status label
+    state.status_label = tk.Label(
+        progress_frame,
+        text="",
+        font=default_font,
+        anchor="w"
+    )
 
-    graphs_frame = tk.Frame(parent)
-    graphs_frame.grid(row=18, column=0, rowspan=2, columnspan=2, sticky="ew")
-    
-    fw_btn = tk.Button(graphs_frame, text="Filter Weights", command=plot_filter, state=tk.DISABLED)
-    fw_btn.grid(row=0, column=0, sticky="ew")
-    
-    pp_btn = tk.Button(graphs_frame, text="Primary Path", command=plot_primary_path_effect, state=tk.DISABLED)
-    pp_btn.grid(row=0, column=1, sticky="ew")
+    state.status_label.grid(
+        row=2,
+        column=0,
+        sticky="ew"
+    )
 
-    sp_btn = tk.Button(graphs_frame, text="Secondary Path", command=plot_secondary_path_effect, state=tk.DISABLED)
-    sp_btn.grid(row=0, column=2, sticky="ew")
-    
-    ea_btn = tk.Button(graphs_frame, text="Error Analysis", command=plot_error, state=tk.DISABLED)
-    ea_btn.grid(row=0, column=3, sticky="ew")
+    # Build metrics frame
+    metrics_frame = ttk.LabelFrame(
+        parent,
+        text="Metrics"
+    )
 
-    sf_btn = tk.Button(graphs_frame, text="Signal Flow", command=plot_signal, state=tk.DISABLED)
-    sf_btn.grid(row=1, column=0, sticky="ew")
+    metrics_frame.grid(
+        row=3,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
 
-    spec_btn = tk.Button(graphs_frame, text="Noise Spectrogram", command=plot_noise_spec, state=tk.DISABLED)
-    spec_btn.grid(row=1, column=1, sticky="ew")
+    # Expand metric value column
+    metrics_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
 
-    err_spec_btn = tk.Button(graphs_frame, text="Error Spectrogram", command=plot_error_spec, state=tk.DISABLED)
-    err_spec_btn.grid(row=1, column=2, sticky="ew")
-    
-    band_btn = tk.Button(graphs_frame, text="Band Attenuation", command=plot_band_attn, state=tk.DISABLED)
-    band_btn.grid(row=1, column=3, sticky="ew")
+    # Add execution-time label
+    tk.Label(
+        metrics_frame,
+        text="Execution time (sec):",
+        font=default_font
+    ).grid(
+        row=0,
+        column=0,
+        sticky="e"
+    )
 
-    save_btn = tk.Button(parent, text="Save Results", command=save_single_results, state=tk.DISABLED)
-    save_btn.grid(row=20, column=0, columnspan=2, sticky="ew")
-    
-    tk.Label(parent, text="Custom Bands (Hz):", font=default_font).grid(row=21, column=0, sticky="ne")
-    state.bands_text = tk.Text(parent, height=3, width=20)
-    state.bands_text.insert(tk.INSERT, "0-500, 500-1000, 1000-3000, 3000-5000, 5000-10000")
-    state.bands_text.grid(row=21, column=1, sticky="ew")
+    # Build execution-time value
+    exec_val = tk.Label(
+        metrics_frame,
+        text="-",
+        font=default_font
+    )
 
-    # Buttons group for global enabling/disabling
+    exec_val.grid(
+        row=0,
+        column=1,
+        sticky="w"
+    )
+
+    # Add convergence label
+    tk.Label(
+        metrics_frame,
+        text="Convergence time (msec):",
+        font=default_font
+    ).grid(
+        row=1,
+        column=0,
+        sticky="e"
+    )
+
+    # Build convergence value
+    conv_val = tk.Label(
+        metrics_frame,
+        text="-",
+        font=default_font
+    )
+
+    conv_val.grid(
+        row=1,
+        column=1,
+        sticky="w"
+    )
+
+    # Add SSE label
+    tk.Label(
+        metrics_frame,
+        text="Steady state error (dBr):",
+        font=default_font
+    ).grid(
+        row=2,
+        column=0,
+        sticky="e"
+    )
+
+    # Build SSE value
+    sse_val = tk.Label(
+        metrics_frame,
+        text="-",
+        font=default_font
+    )
+
+    sse_val.grid(
+        row=2,
+        column=1,
+        sticky="w"
+    )
+
+    # Add ANC OFF label
+    tk.Label(
+        metrics_frame,
+        text="Power (ANC OFF):",
+        font=default_font
+    ).grid(
+        row=3,
+        column=0,
+        sticky="e"
+    )
+
+    # Build ANC OFF value
+    inpow_val = tk.Label(
+        metrics_frame,
+        text="-",
+        font=default_font
+    )
+
+    inpow_val.grid(
+        row=3,
+        column=1,
+        sticky="w"
+    )
+
+    # Add ANC ON label
+    tk.Label(
+        metrics_frame,
+        text="Power (ANC ON):",
+        font=default_font
+    ).grid(
+        row=4,
+        column=0,
+        sticky="e"
+    )
+
+    # Build ANC ON value
+    outpow_val = tk.Label(
+        metrics_frame,
+        text="-",
+        font=default_font
+    )
+
+    outpow_val.grid(
+        row=4,
+        column=1,
+        sticky="w"
+    )
+
+    # Build playback frame
+    playback_frame = ttk.LabelFrame(
+        parent,
+        text="Playback"
+    )
+
+    playback_frame.grid(
+        row=4,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Use equal playback widths
+    playback_frame.grid_columnconfigure(
+        0,
+        weight=1,
+        uniform="playback_buttons"
+    )
+
+    playback_frame.grid_columnconfigure(
+        1,
+        weight=1,
+        uniform="playback_buttons"
+    )
+
+    playback_frame.grid_columnconfigure(
+        2,
+        weight=1,
+        uniform="playback_buttons"
+    )
+
+    # Build input playback button
+    play_input_btn = tk.Button(
+        playback_frame,
+        text="Play Input",
+        command=lambda: toggle_play(
+            play_input_btn,
+            state.play_input
+        ),
+        state=tk.DISABLED
+    )
+
+    play_input_btn.grid(
+        row=0,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build ANC OFF playback button
+    play_anc_off_btn = tk.Button(
+        playback_frame,
+        text="Play ANC OFF",
+        command=lambda: toggle_play(
+            play_anc_off_btn,
+            state.play_anc_off
+        ),
+        state=tk.DISABLED
+    )
+
+    play_anc_off_btn.grid(
+        row=0,
+        column=1,
+        sticky="ew"
+    )
+
+    # Build ANC ON playback button
+    play_anc_on_btn = tk.Button(
+        playback_frame,
+        text="Play ANC ON",
+        command=lambda: toggle_play(
+            play_anc_on_btn,
+            state.play_anc_on
+        ),
+        state=tk.DISABLED
+    )
+
+    play_anc_on_btn.grid(
+        row=0,
+        column=2,
+        sticky="ew"
+    )
+
+    # Build plots frame
+    plots_frame = ttk.LabelFrame(
+        parent,
+        text="Plots"
+    )
+
+    plots_frame.grid(
+        row=5,
+        column=0,
+        columnspan=2,
+        sticky="nsew",
+        padx=5,
+        pady=5
+    )
+
+    # Use equal plot widths
+    for column in range(4):
+        plots_frame.grid_columnconfigure(
+            column,
+            weight=1,
+            uniform="plot_buttons"
+        )
+
+    # Expand custom-band row
+    plots_frame.grid_rowconfigure(
+        3,
+        weight=1
+    )
+
+    # Build filter-weight button
+    fw_btn = tk.Button(
+        plots_frame,
+        text="Filter Weights",
+        command=plot_filter,
+        state=tk.DISABLED
+    )
+
+    fw_btn.grid(
+        row=0,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build primary-path button
+    pp_btn = tk.Button(
+        plots_frame,
+        text="Primary Path",
+        command=plot_primary_path_effect,
+        state=tk.DISABLED
+    )
+
+    pp_btn.grid(
+        row=0,
+        column=1,
+        sticky="ew"
+    )
+
+    # Build secondary-path button
+    sp_btn = tk.Button(
+        plots_frame,
+        text="Secondary Path",
+        command=plot_secondary_path_effect,
+        state=tk.DISABLED
+    )
+
+    sp_btn.grid(
+        row=0,
+        column=2,
+        sticky="ew"
+    )
+
+    # Build error-analysis button
+    ea_btn = tk.Button(
+        plots_frame,
+        text="Error Analysis",
+        command=plot_error,
+        state=tk.DISABLED
+    )
+
+    ea_btn.grid(
+        row=0,
+        column=3,
+        sticky="ew"
+    )
+
+    # Build signal-flow button
+    sf_btn = tk.Button(
+        plots_frame,
+        text="Signal Flow",
+        command=plot_signal,
+        state=tk.DISABLED
+    )
+
+    sf_btn.grid(
+        row=1,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build noise-spectrogram button
+    spec_btn = tk.Button(
+        plots_frame,
+        text="Noise Spectrogram",
+        command=plot_noise_spec,
+        state=tk.DISABLED
+    )
+
+    spec_btn.grid(
+        row=1,
+        column=1,
+        sticky="ew"
+    )
+
+    # Build error-spectrogram button
+    err_spec_btn = tk.Button(
+        plots_frame,
+        text="Error Spectrogram",
+        command=plot_error_spec,
+        state=tk.DISABLED
+    )
+
+    err_spec_btn.grid(
+        row=1,
+        column=2,
+        sticky="ew"
+    )
+
+    # Build band-attenuation button
+    band_btn = tk.Button(
+        plots_frame,
+        text="Band Attenuation",
+        command=plot_band_attn,
+        state=tk.DISABLED
+    )
+
+    band_btn.grid(
+        row=1,
+        column=3,
+        sticky="ew"
+    )
+
+    # Build save button
+    save_btn = tk.Button(
+        plots_frame,
+        text="Save Results",
+        command=save_single_results,
+        state=tk.DISABLED
+    )
+
+    save_btn.grid(
+        row=2,
+        column=0,
+        columnspan=4,
+        sticky="ew",
+        pady=(4, 0)
+    )
+
+    # Add custom-band label
+    tk.Label(
+        plots_frame,
+        text="Custom Bands (Hz):",
+        font=default_font
+    ).grid(
+        row=3,
+        column=0,
+        sticky="ne"
+    )
+
+    # Build custom-band frame
+    bands_frame = tk.Frame(
+        plots_frame
+    )
+
+    bands_frame.grid(
+        row=3,
+        column=1,
+        columnspan=3,
+        sticky="nsew"
+    )
+
+    # Expand custom-band text
+    bands_frame.grid_columnconfigure(
+        0,
+        weight=1
+    )
+
+    bands_frame.grid_rowconfigure(
+        0,
+        weight=1
+    )
+
+    # Build custom-band text
+    state.bands_text = tk.Text(
+        bands_frame,
+        height=3,
+        width=20
+    )
+
+    # Insert default bands
+    state.bands_text.insert(
+        tk.INSERT,
+        (
+            "0-500, 500-1000, "
+            "1000-3000, 3000-5000, "
+            "5000-10000"
+        )
+    )
+
+    state.bands_text.grid(
+        row=0,
+        column=0,
+        sticky="nsew"
+    )
+
+    # Add resize grip
+    ttk.Sizegrip(
+        bands_frame
+    ).grid(
+        row=1,
+        column=0,
+        sticky="se"
+    )
+
+    # Expand plots section
+    parent.grid_rowconfigure(
+        5,
+        weight=1
+    )
+
+    # Store result buttons
     state.all_buttons.extend([
-        play_before_btn, play_after_btn, save_btn, fw_btn, pp_btn,
-        sp_btn, ea_btn, sf_btn, spec_btn, err_spec_btn, band_btn
+        play_input_btn,
+        play_anc_off_btn,
+        play_anc_on_btn,
+        save_btn,
+        fw_btn,
+        pp_btn,
+        sp_btn,
+        ea_btn,
+        sf_btn,
+        spec_btn,
+        err_spec_btn,
+        band_btn
     ])
 
-    # Expose callback to other panels
-    state.start_single_run_cb = start_algorithm
+    # Expose Single Run callback
+    state.start_single_run_cb = (
+        start_algorithm
+    )
 
-    # Initial validation
-    parent.after(0, on_noise_source_change)
-    parent.after(0, on_algorithm_change)
+    # Initialize source widgets
+    parent.after(
+        0,
+        on_noise_source_change
+    )
+
+    # Initialize algorithm widgets
+    parent.after(
+        0,
+        on_algorithm_change
+    )

@@ -18,11 +18,9 @@ class OnnxCRN(nn.Module):
         # Run Neural Network core
         return self.model.forward_stft(stft_input)
 
-
 def get_onnx_path(checkpoint_path):
     # Use same filename with ONNX extension
     return Path(checkpoint_path).with_suffix(".onnx")
-
 
 def export_checkpoint_to_onnx(checkpoint_path):
     # Use CPU for export
@@ -70,7 +68,6 @@ def export_checkpoint_to_onnx(checkpoint_path):
 
     # Return exported model path
     return str(onnx_path)
-
 
 def load_onnx_session(checkpoint_path, backend="onnx"):
     # Import ONNX Runtime only when needed
@@ -136,9 +133,6 @@ def load_onnx_session(checkpoint_path, backend="onnx"):
             providers=["CPUExecutionProvider"]
         )
 
-    # Show active execution providers
-    print("ONNX Runtime providers:", session.get_providers())
-
     # ONNX preprocessing remains on CPU
     device = torch.device("cpu")
 
@@ -149,10 +143,39 @@ def run_onnx_model(session, x, config):
     # Read model settings
     fs = int(config.get("target_fs", 16000))
     delay_m = int(config.get("delay_m", 0))
+
+    frame_ms = int(  # Read checkpoint frame duration
+        config.get(
+            "frame_ms",
+            32
+        )
+    )
+
+    hop_ms = int(  # Read checkpoint frame shift
+        config.get(
+            "hop_ms",
+            10
+        )
+    )
+
+    # Read STFT window
+    window_type = str(
+        config.get(
+            "window_type",
+            "rectangular"
+        )
+    ).lower()
+
     signal_length = int(x.shape[1])
 
     # Convert signal to STFT channels
-    stft_input = signal_to_stft_channels(x.detach().cpu(), fs)
+    stft_input = signal_to_stft_channels(
+        x.detach().cpu(),
+        fs,
+        window_type=window_type,
+        frame_ms=frame_ms,  # Use checkpoint frame duration
+        hop_ms=hop_ms  # Use checkpoint frame shift
+    )
 
     # Apply the same frame delay as PyTorch
     stft_input = apply_frame_delay(stft_input, delay_m)
@@ -170,4 +193,11 @@ def run_onnx_model(session, x, config):
     stft_output = torch.from_numpy(output_array)
 
     # Convert predicted STFT to time signal
-    return stft_channels_to_signal(stft_output, signal_length, fs)
+    return stft_channels_to_signal(
+        stft_output,
+        signal_length,
+        fs,
+        window_type=window_type,
+        frame_ms=frame_ms,  # Use checkpoint frame duration
+        hop_ms=hop_ms  # Use checkpoint frame shift
+    )

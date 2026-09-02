@@ -19,3 +19,7 @@ plot_path_responses.py
 journal.xlsx
 nn_log.csv
 checkpoints
+models
+logs
+dataset
+code.zip

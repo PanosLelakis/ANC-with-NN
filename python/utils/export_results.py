@@ -2,20 +2,6 @@ import os
 import pandas as pd
 import json
 
-# Small tolerance so values close to duration are treated as non-converged
-CONV_MS_TOL = 1e-6
-
-def remove_non_converged_cases(group, duration_ms=None):
-    # Keep only rows with a valid convergence time
-    group = group[group["conv_ms"].notna()].copy()
-
-    # If duration is known, remove cases that reached the end of the simulation
-    if duration_ms is not None:
-        group = group[group["conv_ms"] < float(duration_ms) - CONV_MS_TOL].copy()
-
-    # Return only useful rows for the performance-range table
-    return group
-
 def read_run_summary(run_path):
     # Read the first line to check if the CSV contains the Excel separator hint.
     with open(run_path, "r", encoding="utf-8-sig") as f:
@@ -48,7 +34,65 @@ def read_run_summary(run_path):
     # Return the cleaned DataFrame.
     return df
 
+def round_csv_numbers(df):
+    # Work on a copy
+    df = df.copy()
+
+    # Round numeric columns
+    for column in df.columns:
+        if not pd.api.types.is_numeric_dtype(
+            df[column]
+        ):
+            continue
+
+        name = str(column).lower()
+
+        # Format filter length
+        if name == "l":
+            df[column] = (
+                df[column]
+                .round()
+                .astype("Int64")
+            )
+            continue
+
+        # Select decimal count
+        if "score" in name:
+            digits = 5
+
+        elif (
+            "power" in name
+            or name in ("mu", "μ")
+        ):
+            digits = 6
+
+        elif any(
+            token in name
+            for token in (
+                "conv",
+                "sse",
+                "attenuation",
+                "dbr",
+                "db",
+                "nmse"
+            )
+        ):
+            digits = 2
+
+        else:
+            digits = 6
+
+        # Round column
+        df[column] = df[column].round(
+            digits
+        )
+
+    return df
+
 def write_excel_csv(df, path):
+    # Round numeric values before export
+    df = round_csv_numbers(df)
+
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         # Excel separator
         f.write("sep=,\n")

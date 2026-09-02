@@ -30,7 +30,11 @@ def log_nn_event(stage, status, execution_time=None, parameters=None, message=""
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "stage": stage,
         "status": status,
-        "execution_time_sec": "" if execution_time is None else round(float(execution_time), 4),
+        "execution_time_sec": (
+            ""
+            if execution_time is None
+            else f"{float(execution_time):.2f}"
+        ),
         "parameters": json.dumps(parameters or {}, ensure_ascii=False),
         "message": message or "",
     }
@@ -63,6 +67,11 @@ def initialize_training_history():
             writer.writerow([
                 "epoch",
                 "training_loss",
+                "training_anc_loss",
+                "training_silence_loss",
+                "training_weighted_silence_loss",
+                "training_frequency_loss",
+                "training_weighted_frequency_loss",
                 "validation_loss",
                 "validation_anc_off_loss",
                 "validation_nmse_db"
@@ -74,6 +83,11 @@ def initialize_training_history():
 def append_training_history(
     epoch,
     training_loss,
+    training_anc_loss,
+    training_silence_loss,
+    training_weighted_silence_loss,
+    training_frequency_loss,
+    training_weighted_frequency_loss,
     validation_loss,
     validation_anc_off_loss,
     validation_nmse_db
@@ -88,16 +102,32 @@ def append_training_history(
     # Build history row
     row = [
         int(epoch),
-        float(training_loss),
-        float(validation_loss),
-        float(validation_anc_off_loss),
-        float(validation_nmse_db)
+        f"{float(training_loss):.8f}",
+        f"{float(training_anc_loss):.8f}",
+        f"{float(training_silence_loss):.8f}",
+        f"{float(training_weighted_silence_loss):.8f}",
+        f"{float(training_frequency_loss):.8f}",
+        f"{float(training_weighted_frequency_loss):.8f}",
+        f"{float(validation_loss):.8f}",
+        f"{float(validation_anc_off_loss):.8f}",
+        f"{float(validation_nmse_db):.2f}"
     ]
 
     # Append history row
     with _HISTORY_LOCK:
-        with open(history_path, "a", newline="", encoding="utf-8-sig") as file:
-            csv.writer(file).writerow(row)
+        with open(
+            history_path,
+            "a",
+            newline="",
+            encoding="utf-8-sig"
+        ) as file:
+            csv.writer(
+                file
+            ).writerow(
+                row
+            )
 
     # Return history path
-    return str(history_path)
+    return str(
+        history_path
+    )

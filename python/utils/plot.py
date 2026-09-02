@@ -61,9 +61,9 @@ def figure_title_metadata(fig,
     title_line1 = f"Algo: {algorithm_name} | μ: {mu_str} | L: {L_str} | Noise: {noise_type}"
 
     if convergence_time is None:
-        conv_str = "Conv. Speed: N/A"
+        conv_str = "Conv. time: N/A"
     else:
-        conv_str = f"Conv. Speed: {float(convergence_time):.2f} ms"
+        conv_str = f"Conv. time: {float(convergence_time):.2f} ms"
 
     if steady_state_error is None:
         sse_str = "SSE: N/A"

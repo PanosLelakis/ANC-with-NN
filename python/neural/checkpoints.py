@@ -7,17 +7,119 @@ from neural.model import build_model
 # best: is saved when validation loss is better than before
 # last: is saved at every epoch
 
-def make_checkpoint_dir(processed_root):
-    # Create checkpoint folder
+def get_models_root():
+    # Build models root
+    models_root = (
+        Path.cwd()
+        / "models"
+    )
 
-    # Checkpoint folder path
-    checkpoint_dir = Path(processed_root) / "checkpoints"
+    # Create models root
+    models_root.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    # Create folder if it does not exist
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    # Return models root
+    return models_root
 
-    # Return checkpoint folder directory
-    return checkpoint_dir
+def build_model_folder_name(config):
+    # Format learning rate
+    learning_rate = (
+        f"{float(config['learning_rate']):.10f}"
+    )
+
+    learning_rate = (
+        learning_rate
+        .rstrip("0")
+        .rstrip(".")
+    )
+
+    if learning_rate.startswith("0."):
+        learning_rate = learning_rate[2:]
+
+    # Format convolution channels
+    conv_channels = "_".join(
+        part.strip()
+        for part in str(
+            config["conv_channels"]
+        ).split(",")
+        if part.strip()
+    )
+
+    architecture = str(  # Read model architecture
+        config.get(
+            "architecture",
+            "simple_crn"
+        )
+    ).lower()
+
+    # Build model folder name
+    return (  # Build descriptive model folder
+        f"{architecture}_"  # Store architecture name
+        f"{int(config['epochs'])}ep_"  # Store epoch count
+        f"{learning_rate}lr_"  # Store learning rate
+        f"{int(config['conv_layers'])}conv_"  # Store convolution depth
+        f"{conv_channels}_"  # Store convolution channels
+        f"{int(config['lstm_layers'])}lstm_"  # Store recurrent depth
+        f"{int(config['lstm_hidden'])}_"  # Store recurrent width
+        f"{int(config['delay_m'])}M"  # Store prediction delay
+    )
+
+def make_model_dir(config):
+    # Build base folder
+    models_root = get_models_root()
+    base_name = build_model_folder_name(
+        config
+    )
+
+    model_dir = (
+        models_root
+        / base_name
+    )
+
+    # Keep repeated trainings separate
+    suffix = 2
+
+    while model_dir.exists():
+        model_dir = (
+            models_root
+            / f"{base_name}_{suffix}"
+        )
+
+        suffix += 1
+
+    # Create model folder
+    model_dir.mkdir(
+        parents=True,
+        exist_ok=False
+    )
+
+    # Return model folder
+    return model_dir
+
+def get_latest_checkpoint_path():
+    # Find trained checkpoints
+    candidates = list(
+        get_models_root().glob(
+            "*/best.pt"
+        )
+    )
+
+    # Return empty path if none exists
+    if not candidates:
+        return ""
+
+    # Find most recently modified model
+    latest = max(
+        candidates,
+        key=lambda path: (
+            path.stat().st_mtime
+        )
+    )
+
+    # Return checkpoint path
+    return str(latest)
 
 def get_checkpoint_paths(checkpoint_dir):
     # Build best and last paths
@@ -72,10 +174,13 @@ def save_checkpoint(
         str(path)
     )
 
-def save_model_info(checkpoint_dir, information):
+def save_model_info(
+    model_dir,
+    information
+):
     # Build model information path
     info_path = (
-        Path(checkpoint_dir)
+        Path(model_dir)
         / "model_info.json"
     )
 

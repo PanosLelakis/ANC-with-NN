@@ -21,6 +21,12 @@ class SharedState:
     nn_checkpoint_path_var: tk.StringVar = None
     nn_backend_var: tk.StringVar = None
 
+    # Single Run model
+    single_nn_checkpoint_path_var: tk.StringVar = None
+
+    # Multi Run model
+    multi_nn_checkpoint_path_var: tk.StringVar = None
+
     # NN training settings
     nn_target_fs_var: tk.StringVar = None
     nn_crop_sec_var: tk.StringVar = None
@@ -57,8 +63,9 @@ class SharedState:
     last_single_result = None
 
     # Normalized playback signals
-    play_before = None
-    play_after = None
+    play_input = None
+    play_anc_off = None
+    play_anc_on = None
 
     # Timings
     single_start_time = None
@@ -77,7 +84,7 @@ def build_and_run():
     
     # Build main window
     root = tk.Tk()
-    root.title("ANC with NN — Single & Multi Run")
+    root.title("ANC with NN — Panos Lelakis")
 
     # Main fonts
     default_font = tkfont.Font(size=10)
@@ -119,25 +126,40 @@ def build_and_run():
     state.ui_drain_after_id = None
 
     # NN dataset defaults
-    state.nn_dataset_root_var = tk.StringVar(value="python/dataset/dataset_1")
-    state.nn_processed_root_var = tk.StringVar(value="python/dataset/processed")
+    state.nn_dataset_root_var = tk.StringVar(
+        value="dataset/trimmed_selection_train_validate"
+    )
+    state.nn_processed_root_var = tk.StringVar(
+        value="dataset/selection_processed"
+    )
     state.nn_checkpoint_path_var = tk.StringVar(value="")
+
+    # Store Single Run model
+    state.single_nn_checkpoint_path_var = tk.StringVar(
+        value=""
+    )
+
+    # Store Multi Run model
+    state.multi_nn_checkpoint_path_var = tk.StringVar(
+        value=""
+    )
+
     state.nn_backend_var = tk.StringVar(value="PyTorch")
 
     # NN model defaults
-    state.nn_conv_layers_var = tk.StringVar(value="2")
-    state.nn_conv_channels_var = tk.StringVar(value="16,32")
-    state.nn_lstm_layers_var = tk.StringVar(value="1")
-    state.nn_lstm_hidden_var = tk.StringVar(value="128")
-    state.nn_delay_m_var = tk.StringVar(value="0")
+    state.nn_conv_layers_var = tk.StringVar(value="5")  # Original encoder depth
+    state.nn_conv_channels_var = tk.StringVar(value="16,32,64,128,256")  # Original encoder channels
+    state.nn_lstm_layers_var = tk.StringVar(value="2")  # Original grouped LSTM depth
+    state.nn_lstm_hidden_var = tk.StringVar(value="1024")  # Original total recurrent width
+    state.nn_delay_m_var = tk.StringVar(value="0")  # Start with no prediction delay
 
     # NN training defaults
     state.nn_target_fs_var = tk.StringVar(value="16000")
-    state.nn_crop_sec_var = tk.StringVar(value="40")
-    state.nn_epochs_var = tk.StringVar(value="30")
-    state.nn_batch_size_var = tk.StringVar(value="1")
-    state.nn_lr_var = tk.StringVar(value="0.001")
-    state.nn_optimizer_var = tk.StringVar(value="AMSGrad")
+    state.nn_crop_sec_var = tk.StringVar(value="10")
+    state.nn_epochs_var = tk.StringVar(value="30")  # Reference epoch count
+    state.nn_batch_size_var = tk.StringVar(value="1")  # Keep project batch size
+    state.nn_lr_var = tk.StringVar(value="0.001")  # Reference learning rate
+    state.nn_optimizer_var = tk.StringVar(value="AMSGrad")  # Reference optimizer
 
     # Load ANC paths once at startup
     state.anc_paths = load_paths()

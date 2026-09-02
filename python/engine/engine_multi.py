@@ -552,7 +552,7 @@ def log_multi_result(result, stage):
         message=("Divergence detected." if diverged else ""),
         divergence=diverged)
 
-def build_multi_result(payload, L, mu, duration):
+def build_multi_result(payload, L, mu):
     # Read convergence time
     conv_ms = payload.get("conv_ms")
 
@@ -660,8 +660,7 @@ def run_and_save_case(
     result = build_multi_result(
         payload=payload,
         L=L,
-        mu=mu,
-        duration=duration
+        mu=mu
     )
 
     # Store saved status
@@ -736,8 +735,7 @@ def run_multi_case(
         result = build_multi_result(
             payload=payload,
             L=L,
-            mu=mu,
-            duration=duration
+            mu=mu
         )
 
     result.update(dict(
@@ -1031,100 +1029,6 @@ def run_multi_sim(
                     completed,
                     total
                 )
-
-    # Count simulations
-    total = len(grid) * len(combinations)
-
-    # Count unique combinations
-    unique_combo_count = len(get_unique_combinations(combinations))
-
-    # Initialize results
-    results = []
-
-    # Initialize completed count
-    completed = 0
-
-    # Prepare each selected noise once
-    noise_bank = build_noise_bank(combinations, duration, paths)
-
-    # Create process pool
-    with ProcessPoolExecutor() as executor:
-        # Store future metadata
-        future_metadata = {}
-
-        # Process parameter grid
-        for mu, L in grid:
-            # Process noise combinations
-            for algorithm, source, noise_label, wav_path in combinations:
-                # Build current noise key
-                noise_key = get_noise_key(source, noise_label, wav_path)
-
-                # Read prepared noise
-                preloaded_noise = noise_bank[noise_key]
-
-                # Submit simulation
-                future = executor.submit(
-                    run_multi_case,
-                    algorithm,
-                    int(L),
-                    float(mu),
-                    source,
-                    noise_label,
-                    wav_path,
-                    duration,
-                    preloaded_noise,
-                    paths,
-                    save_mode,
-                    results_root
-                )
-
-                # Store simulation metadata
-                future_metadata[future] = {
-                    # Algorithm
-                    "algorithm": algorithm,
-
-                    # Noise settings
-                    "source": source,
-                    "noise_label": noise_label,
-                    "wav_path": wav_path,
-
-                    # Parameters
-                    "L": int(L),
-                    "mu": float(mu)
-                }
-
-        # Read completed simulations
-        for future in as_completed(future_metadata):
-            # Read simulation metadata
-            metadata = future_metadata[future]
-
-            try:
-                # Read simulation result
-                result = future.result()
-
-                # Add metadata to result
-                result.update(metadata)
-
-                # Store result
-                results.append(result)
-
-                # Log simulation
-                log_multi_result(result, stage="simulate")
-
-                # Log saved case
-                if save_mode == "all":
-                    log_multi_result(result, stage="save")
-
-            except Exception as error:
-                # Log failed simulation
-                log_multi_error(metadata, error)
-
-            # Increase completed count
-            completed += 1
-
-            # Send progress update
-            if progress_callback is not None:
-                progress_callback(completed, total)
 
     # Rank completed simulations
     ranked_results = score_results(results=results, duration_s=duration, alpha=alpha)

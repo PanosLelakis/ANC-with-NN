@@ -7,6 +7,27 @@ from utils import plot as U
 def safe_name(s):
     return "".join(c for c in str(s) if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
 
+def format_csv_number(
+    value,
+    format_spec
+):
+    # Return empty text for missing values
+    if value is None or value == "":
+        return ""
+
+    # Convert to number
+    number = float(value)
+
+    # Return empty text for invalid values
+    if not np.isfinite(number):
+        return ""
+
+    # Return formatted number
+    return format(
+        number,
+        format_spec
+    )
+
 def save_case_artifacts(
     payload,
     alg,
@@ -185,22 +206,117 @@ def append_run_summary(row, results_root="results"):
         if new_file:
             writer.writeheader()
 
+        # Round frequency-band values
+        band_attenuation = {
+            str(key): round(
+                float(value),
+                2
+            )
+            for key, value
+            in row.get(
+                "band_attenuation",
+                {}
+            ).items()
+            if (
+                value is not None
+                and np.isfinite(
+                    float(value)
+                )
+            )
+        }
+
         writer.writerow({
-            "run_kind": row.get("run_kind", "multi"),
-            "algorithm": row.get("algorithm", ""),
-            "noise_source": row.get("noise_source", row.get("source", "")),
-            "noise_label": row.get("noise_label", ""),
-            "L": row.get("L", ""),
-            "mu": row.get("mu", ""),
-            "score": row.get("score", ""),
-            "conv_ms": row.get("conv_ms", ""),
-            "sse_db": row.get("sse_db", ""),
-            "power_anc_off": row.get("power_anc_off", row.get("in_power", "")),
-            "power_anc_on": row.get("power_anc_on", row.get("out_power", "")),
-            "attenuation_db": row.get("attenuation_db", ""),
-            "divergence": row.get("divergence", False),
-            "status": row.get("status", ""),
-            "save_path": row.get("save_path", ""),
-            "avg_pnc_dbr": row.get("avg_pnc_dbr", ""),
-            "band_attenuation": json.dumps(row.get("band_attenuation", {}), ensure_ascii=False)
+            "run_kind": row.get(
+                "run_kind",
+                ""
+            ),
+
+            "algorithm": row.get(
+                "algorithm",
+                ""
+            ),
+
+            "noise_source": row.get(
+                "noise_source",
+                row.get("source", "")
+            ),
+
+            "noise_label": row.get(
+                "noise_label",
+                ""
+            ),
+
+            "L": (
+                ""
+                if row.get("L") in (None, "")
+                else int(row.get("L"))
+            ),
+
+            "mu": format_csv_number(
+                row.get("mu"),
+                ".6g"
+            ),
+
+            "score": format_csv_number(
+                row.get("score"),
+                ".5f"
+            ),
+
+            "conv_ms": format_csv_number(
+                row.get("conv_ms"),
+                ".2f"
+            ),
+
+            "sse_db": format_csv_number(
+                row.get("sse_db"),
+                ".2f"
+            ),
+
+            "power_anc_off": format_csv_number(
+                row.get(
+                    "power_anc_off",
+                    row.get("in_power")
+                ),
+                ".6f"
+            ),
+
+            "power_anc_on": format_csv_number(
+                row.get(
+                    "power_anc_on",
+                    row.get("out_power")
+                ),
+                ".6f"
+            ),
+
+            "attenuation_db": format_csv_number(
+                row.get("attenuation_db"),
+                ".2f"
+            ),
+
+            "divergence": bool(
+                row.get(
+                    "divergence",
+                    False
+                )
+            ),
+
+            "status": row.get(
+                "status",
+                ""
+            ),
+
+            "save_path": row.get(
+                "save_path",
+                ""
+            ),
+
+            "avg_pnc_dbr": format_csv_number(
+                row.get("avg_pnc_dbr"),
+                ".2f"
+            ),
+
+            "band_attenuation": json.dumps(
+                band_attenuation,
+                ensure_ascii=False
+            )
         })

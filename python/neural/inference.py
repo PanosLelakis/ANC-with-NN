@@ -40,11 +40,19 @@ def run_anc_inference(
         # Compute desired signal
         d = causal_fir_filter(x, primary_path)
 
-        # Compute controller output
+         # Run ONNX controller
         if backend == "onnx":
-            y = run_onnx_model(model, x, config)
+            y = run_onnx_model(
+                model,
+                x,
+                config
+            )
+
+        # Run PyTorch controller
         else:
-            y = model(x)
+            y = model(
+                x
+            )
 
         # Compute secondary path output
         a = causal_fir_filter(y, secondary_path)

@@ -81,15 +81,60 @@ def process_one_file(input_path, output_path, target_fs, crop_sec):
     x = resample_if_needed(x, source_fs, target_fs)
 
     # Crop audio
-    target_len = int(float(crop_sec) * int(target_fs))
-    x = crop_or_loop(x, target_len)
+    target_len = int(
+        float(crop_sec)
+        * int(target_fs)
+    )
 
-    # Normalize audio
-    x = normalize_unit_power(x)
+    x = crop_or_loop(
+        x,
+        target_len
+    )
+
+    # Detect explicit silence filename
+    is_silence_file = (
+        Path(input_path)
+        .stem
+        .lower()
+        .startswith("silence")
+    )
+
+    # Preserve silence amplitude
+    if is_silence_file:
+        x = x.astype(
+            np.float32,
+            copy=False
+        )
+
+        # Check that the file is actually near silence
+        silence_peak = float(
+            np.max(
+                np.abs(x)
+            )
+        )
+
+        if silence_peak > 1e-6:
+            raise ValueError(
+                f"File is named as silence but "
+                f"has peak amplitude {silence_peak:.3e}: "
+                f"{input_path}"
+            )
+
+    # Normalize normal noise files
+    else:
+        x = normalize_unit_power(x)
 
     # Save audio
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    wavfile.write(str(output_path), int(target_fs), x.astype(np.float32))
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    wavfile.write(
+        str(output_path),
+        int(target_fs),
+        x.astype(np.float32)
+    )
 
     return {
         "original_path": str(input_path),
@@ -98,7 +143,11 @@ def process_one_file(input_path, output_path, target_fs, crop_sec):
         "target_fs": int(target_fs),
         "original_duration_sec": round(float(original_duration), 4),
         "processed_duration_sec": round(float(crop_sec), 4),
-        "normalization": "unit_power"
+        "normalization": (
+            "preserved_silence"
+            if is_silence_file
+            else "unit_power"
+        )
     }
 
 def process_one_job(job):

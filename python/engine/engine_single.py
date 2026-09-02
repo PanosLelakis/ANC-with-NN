@@ -1,6 +1,9 @@
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import resample, lfilter
+from scipy.signal import (
+    resample,
+    lfilter
+)
 import time
 from algorithms.lms import LMS
 from algorithms.nlms import NLMS
@@ -26,9 +29,6 @@ from utils.smoothing import whittaker_eilers_smooth
 from utils.convert_to_db import val_to_dbr
 import warnings
 from scipy.io.wavfile import WavFileWarning
-import faulthandler
-# Enable faulthandler for better debugging of crashes
-faulthandler.enable()
 
 # Ignore WAV file warnings because they mean nothing
 warnings.simplefilter("ignore", WavFileWarning)
@@ -383,6 +383,20 @@ def run_neural_anc_single(
     # Read sampling rate
     fs = int(config.get("target_fs", 16000))
 
+    frame_ms = int(  # Read checkpoint frame duration
+        config.get(
+            "frame_ms",
+            32
+        )
+    )
+
+    hop_ms = int(  # Read checkpoint frame shift
+        config.get(
+            "hop_ms",
+            10
+        )
+    )
+
     # Build signal length
     duration = float(duration)
     N = int(duration * fs)
@@ -462,19 +476,58 @@ def run_neural_anc_single(
         config=config
     )
 
-    # Read desired signal
+    # Build zero input
+    zero_x = torch.zeros_like(
+        x
+    )
+
+    # Run zero-input inference
+    zero_signals = run_anc_inference(
+        model=model,
+        x=zero_x,
+        primary_path=primary_path,
+        secondary_path=secondary_path,
+        backend=nn_backend,
+        config=config
+    )
+
+    # Read ANC OFF signal and secondary-path outputs
     d = signals["d"]
-
-    # Read secondary output
     a = signals["a"]
+    a0 = zero_signals["a"]
 
-    # Read residual error
-    e = signals["e"]
+    # Remove the zero-input component.
+    # The secondary path is linear, so S(y - y0) = S(y) - S(y0).
+    corrected_a = (
+        a
+        - a0
+    )
+
+    # Compute zero-input corrected residual
+    corrected_e = (
+        d
+        - corrected_a
+    )
 
     # Convert tensors to numpy
     primary_output_raw = d.squeeze(0).detach().cpu().numpy().astype(np.float32)
-    secondary_output_raw = a.squeeze(0).detach().cpu().numpy().astype(np.float32)
-    error_signal = e.squeeze(0).detach().cpu().numpy().astype(np.float32)
+    # Use zero-bias corrected secondary output
+    secondary_output_raw = (
+        corrected_a.squeeze(0)
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
+
+    # Use zero-bias corrected residual
+    error_signal = (
+        corrected_e.squeeze(0)
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
 
     # Match metadata length
     N = len(error_signal)

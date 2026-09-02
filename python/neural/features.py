@@ -5,56 +5,74 @@ import torch.nn.functional as F
 FRAME = 32 # msec (20 msec original)
 HOP = 10 # = frame - overlap = 10 msec
 
+# Default STFT window
+DEFAULT_WINDOW_TYPE = "hamming"
+
 def ms_to_samples(ms, fs):
     # Convert ms to samples
     return int(round(float(ms) * float(fs) / 1000.0))
 
-def get_stft_params(fs):
-    # Build STFT parameters
-    win_length = ms_to_samples(FRAME, fs)
-    hop_length = ms_to_samples(HOP, fs)
-    n_fft = win_length
-    
-    # Return parameters
-    return {
-        "n_fft": n_fft,
-        "win_length": win_length,
-        "hop_length": hop_length
+def get_stft_params(  # Build STFT settings
+    fs,  # Sampling rate
+    frame_ms=FRAME,  # Frame duration
+    hop_ms=HOP  # Frame shift
+):
+    win_length = ms_to_samples(frame_ms, fs)  # Convert frame duration to samples
+    hop_length = ms_to_samples(hop_ms, fs)  # Convert frame shift to samples
+    n_fft = win_length  # Use one FFT point per frame sample
+
+    return {  # Return STFT settings
+        "n_fft": n_fft,  # FFT size
+        "win_length": win_length,  # Window size
+        "hop_length": hop_length  # Frame shift
     }
 
-def make_window(win_length, device):
-    # Create Hann window
-    #return torch.hann_window(win_length, periodic=True, device=device)
+def make_window(
+    win_length,
+    device,
+    window_type=DEFAULT_WINDOW_TYPE
+):
+    # Normalize window type
+    window_type = str(
+        window_type
+    ).lower()
+
     # Create rectangular window
-    return torch.ones(win_length, device=device)
+    if window_type == "rectangular":
+        return torch.ones(
+            win_length,
+            device=device
+        )
 
-def frame_signal(x, frame_length, hop_length):
-    # Split signal into overlapping frames
-    frame_length = int(frame_length)
-    hop_length = int(hop_length)
+    # Create Hamming window
+    if window_type == "hamming":
+        return torch.hamming_window(
+            win_length,
+            periodic=True,
+            device=device
+        )
 
-    return x.unfold(dimension=-1, size=frame_length, step=hop_length)
-
-def reference_to_frames(x, fs):
-    # Split reference into frames
-    # input: x shape = [batch, samples]
-    # output: frames shape = [batch, num_frames, 512]
-    
-    # Get STFT parameters
-    params = get_stft_params(fs)
-
-    # Return framed signal
-    return frame_signal(
-        x = x,
-        frame_length = params["win_length"],
-        hop_length = params["hop_length"]
+    # Reject unknown window
+    raise ValueError(
+        f"Unknown STFT window: "
+        f"{window_type}"
     )
 
-def signal_to_complex_stft(x, fs):
+def signal_to_complex_stft(  # Convert waveform to complex STFT
+    x,  # Input waveform
+    fs,  # Sampling rate
+    window_type=DEFAULT_WINDOW_TYPE,  # STFT window
+    frame_ms=FRAME,  # Frame duration
+    hop_ms=HOP  # Frame shift
+):
     # Convert time signal to complex STFT
     
     # Get STFT parameters
-    params = get_stft_params(fs)
+    params = get_stft_params(  # Read model-specific STFT settings
+        fs,  # Sampling rate
+        frame_ms=frame_ms,  # Frame duration
+        hop_ms=hop_ms  # Frame shift
+    )
 
     # Read signal length
     signal_length = x.shape[-1]
@@ -75,7 +93,11 @@ def signal_to_complex_stft(x, fs):
         x = F.pad(x, (0, padding))
 
     # Create window
-    window = make_window(params["win_length"], device=x.device)
+    window = make_window(
+        params["win_length"],
+        device=x.device,
+        window_type=window_type
+    )
 
     # Compute STFT
     X = torch.stft(
@@ -110,25 +132,50 @@ def channels_to_complex_stft(X_channels):
     # Return complex STFT
     return torch.complex(real, imag)
 
-def signal_to_stft_channels(x, fs):
-    # Convert time signal to STFT channels
-    X = signal_to_complex_stft(x, fs)
-    
-    # Return STFT channels
-    return complex_stft_to_channels(X)
+def signal_to_stft_channels(  # Convert waveform to real-imaginary channels
+    x,  # Input waveform
+    fs,  # Sampling rate
+    window_type=DEFAULT_WINDOW_TYPE,  # STFT window
+    frame_ms=FRAME,  # Frame duration
+    hop_ms=HOP  # Frame shift
+):
+    X = signal_to_complex_stft(  # Compute complex STFT
+        x,  # Input waveform
+        fs,  # Sampling rate
+        window_type=window_type,  # Selected window
+        frame_ms=frame_ms,  # Selected frame duration
+        hop_ms=hop_ms  # Selected frame shift
+    )
 
-def stft_channels_to_signal(Y_channels, length, fs):
+    return complex_stft_to_channels(X)  # Split real and imaginary parts
+
+def stft_channels_to_signal(  # Convert real-imaginary channels to waveform
+    Y_channels,  # Predicted STFT channels
+    length,  # Requested waveform length
+    fs,  # Sampling rate
+    window_type=DEFAULT_WINDOW_TYPE,  # STFT window
+    frame_ms=FRAME,  # Frame duration
+    hop_ms=HOP  # Frame shift
+):
     # Convert STFT channels to time signal
     
     # Merge channels to complex STFT
     Y = channels_to_complex_stft(Y_channels)
     
     # Get STFT parameters
-    params = get_stft_params(fs)
+    params = get_stft_params(  # Read model-specific STFT settings
+        fs,  # Sampling rate
+        frame_ms=frame_ms,  # Frame duration
+        hop_ms=hop_ms  # Frame shift
+    )
 
     # Create window
-    window = make_window(params["win_length"], device=Y_channels.device)
-    
+    window = make_window(
+        params["win_length"],
+        device=Y_channels.device,
+        window_type=window_type
+    )
+
     y = torch.istft(
         Y,
         n_fft = params["n_fft"],
@@ -184,3 +231,119 @@ def apply_frame_delay(X_channels, delay_m):
 
     # Return shifted frames
     return shifted
+
+def compute_frequency_balanced_residual_loss(  # Compute frequency-balanced residual loss
+    desired_signal,  # Desired microphone signal
+    residual_signal,  # ANC residual signal
+    fs,  # Sampling rate
+    valid_mask=None,  # Valid training items
+    power_floor_ratio=0.01,  # Frequency normalization floor
+    window_type=DEFAULT_WINDOW_TYPE,  # STFT window
+    frame_ms=FRAME,  # Frame duration
+    hop_ms=HOP  # Frame shift
+):
+    # Convert desired signal to STFT
+    D = signal_to_complex_stft(
+        desired_signal,
+        fs,
+        window_type=window_type,
+        frame_ms=frame_ms,  # Use model frame duration
+        hop_ms=hop_ms  # Use model frame shift
+    )
+
+    # Convert residual signal to STFT
+    E = signal_to_complex_stft(
+        residual_signal,
+        fs,
+        window_type=window_type,
+        frame_ms=frame_ms,  # Use model frame duration
+        hop_ms=hop_ms  # Use model frame shift
+    )
+
+    # Match frame counts
+    frames = min(
+        D.shape[-1],
+        E.shape[-1]
+    )
+
+    D = D[
+        ...,
+        :frames
+    ]
+
+    E = E[
+        ...,
+        :frames
+    ]
+
+    # Compute desired power per frequency
+    desired_power = torch.mean(
+        torch.abs(D) ** 2,
+        dim=-1
+    ).detach()
+
+    # Compute residual power per frequency
+    residual_power = torch.mean(
+        torch.abs(E) ** 2,
+        dim=-1
+    )
+
+    # Find maximum desired power per item
+    maximum_desired_power = torch.max(
+        desired_power,
+        dim=1,
+        keepdim=True
+    ).values
+
+    # Compute minimum normalization power
+    power_floor = (
+        maximum_desired_power
+        * float(power_floor_ratio)
+    )
+
+    power_floor = torch.clamp(
+        power_floor,
+        min=1e-12
+    )
+
+    # Apply power floor
+    normalization_power = torch.maximum(
+        desired_power,
+        power_floor
+    )
+
+    # Compute normalized residual power
+    normalized_residual_power = (
+        residual_power
+        / normalization_power
+    )
+
+    # Give equal weight to frequency bins
+    item_loss = torch.mean(
+        normalized_residual_power,
+        dim=1
+    )
+
+    # Use all items when no mask is provided
+    if valid_mask is None:
+        return torch.mean(
+            item_loss
+        )
+
+    # Keep only valid non-silence items
+    valid_mask = valid_mask.bool()
+
+    if torch.any(
+        valid_mask
+    ):
+        return torch.mean(
+            item_loss[
+                valid_mask
+            ]
+        )
+
+    # Return differentiable zero
+    return (
+        residual_power.mean()
+        * 0.0
+    )

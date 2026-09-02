@@ -1,9 +1,3 @@
-def moving_rms(x, win):
-    import numpy as np
-    x = np.asarray(x, dtype=float)
-    p = np.convolve(x * x, np.ones(win, dtype=float) / win, mode="same")
-    return np.sqrt(p + 1e-12)
-
 def clamp_odd_window(desired, n):
     """
     Returns an odd window length <= n and >= 3 (or 1 if n<3).

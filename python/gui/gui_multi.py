@@ -61,10 +61,55 @@ def build_multi_ui(parent, state, default_font, header_font):
         best_L_val.config(text="L:")
 
         # Clear convergence metric
-        best_conv_val.config(text="Convergence speed:")
+        best_conv_val.config(text="Convergence time:")
 
         # Clear SSE metric
         best_sse_val.config(text="SSE:")
+
+    def select_model_file():
+        # Read current model path
+        current_path = (
+            state.multi_nn_checkpoint_path_var
+            .get()
+            .strip()
+        )
+
+        # Select starting folder
+        initial_dir = (
+            os.path.dirname(current_path)
+            if current_path
+            else os.path.join(
+                os.getcwd(),
+                "models"
+            )
+        )
+
+        # Open checkpoint selector
+        path = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            filetypes=[
+                (
+                    "PyTorch checkpoints",
+                    "*.pt"
+                ),
+                (
+                    "All files",
+                    "*.*"
+                )
+            ]
+        )
+
+        # Stop when no file is selected
+        if not path:
+            return
+
+        # Store selected checkpoint
+        state.multi_nn_checkpoint_path_var.set(
+            path
+        )
+
+        # Refresh Start button
+        validate_multi_ready()
 
     # --- WAV selection (multi-file) ---
     def select_wav_files():
@@ -224,7 +269,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                     and values["L_steps"] > 0
                 )
 
-            # Check selections
+            # Check algorithm and noise selection
             selection_ok = (
                 bool(selection["algorithms"])
                 and bool(
@@ -232,6 +277,20 @@ def build_multi_ui(parent, state, default_font, header_font):
                     or selection["wav_paths"]
                 )
             )
+
+            # Require model for Neural Network
+            if (
+                "Neural Network"
+                in selection["algorithms"]
+            ):
+                selection_ok = (
+                    selection_ok
+                    and bool(
+                        state.multi_nn_checkpoint_path_var
+                        .get()
+                        .strip()
+                    )
+                )
 
             ok = (
                 numeric_ok
@@ -278,6 +337,35 @@ def build_multi_ui(parent, state, default_font, header_font):
             except Exception:
                 pass
 
+        validate_multi_ready()
+
+    def update_algorithm_widgets(*_):
+        # Check Neural Network selection
+        is_neural = bool(
+            alg_vars[
+                "Neural Network"
+            ].get()
+        )
+
+        # Update backend menu
+        nn_backend_menu.config(
+            state=(
+                "readonly"
+                if is_neural
+                else tk.DISABLED
+            )
+        )
+
+        # Update model button
+        nn_model_btn.config(
+            state=(
+                tk.NORMAL
+                if is_neural
+                else tk.DISABLED
+            )
+        )
+
+        # Refresh Start button
         validate_multi_ready()
 
     # ---------- actions ----------
@@ -356,6 +444,14 @@ def build_multi_ui(parent, state, default_font, header_font):
         # algorithm
         state.algo_var.set(best["algorithm"])
 
+        # Copy selected Neural Network model
+        if best["algorithm"] == "Neural Network":
+            state.single_nn_checkpoint_path_var.set(
+                state.multi_nn_checkpoint_path_var
+                .get()
+                .strip()
+            )
+
         # noise settings -> Single Run panel
         if best["source"] == "Stationary":
             state.noise_source_var.set("Stationary")
@@ -373,14 +469,12 @@ def build_multi_ui(parent, state, default_font, header_font):
                 fname = os.path.basename(best.get("wav_path",""))
                 state.wav_label_ref.config(text=fname)
 
-        # duration (mirror multi-run)
-        try:
-            dur_txt = mr_duration_entry.get().strip()
-            if dur_txt:
-                state.duration_entry.delete(0, "end")
-                state.duration_entry.insert(0, dur_txt)
-        except Exception:
-            pass
+        # Mirror Multi Run duration
+        dur_txt = mr_duration_entry.get().strip()
+
+        if dur_txt:
+            state.duration_entry.delete(0, "end")
+            state.duration_entry.insert(0, dur_txt)
 
         if state.start_single_run_cb:
             state.start_single_run_cb()
@@ -396,13 +490,15 @@ def build_multi_ui(parent, state, default_font, header_font):
         # Update progress bar
         mr_progress_var.set(percentage)
 
-        # Update status and ETA
+        # Update status
         mr_status.config(
-            text=(
-                f"{completed}/{total} — "
-                f"{estimate_eta(start_time, completed, total)}"
-            ),
+            text=f"{completed}/{total}",
             fg="black"
+        )
+
+        # Update ETA
+        mr_eta_label.config(
+            text=estimate_eta(start_time, completed, total)
         )
 
     def update_save_progress(
@@ -414,6 +510,9 @@ def build_multi_ui(parent, state, default_font, header_font):
 
         # Update progress bar
         mr_progress_var.set(percentage)
+
+        # Update ETA
+        mr_eta_label.config(text="ETA --:--")
 
         # Update status
         mr_status.config(
@@ -496,18 +595,21 @@ def build_multi_ui(parent, state, default_font, header_font):
         if "Neural Network" in sel_algs:
             # Read selected checkpoint
             nn_checkpoint_path = (
-                state.nn_checkpoint_path_var
+                state.multi_nn_checkpoint_path_var
                 .get()
                 .strip()
             )
 
-            # Use default best checkpoint
             if not nn_checkpoint_path:
-                nn_checkpoint_path = os.path.join(
-                    state.nn_processed_root_var.get(),
-                    "checkpoints",
-                    "best.pt"
+                mr_status.config(
+                    text=(
+                        "Select a Neural Network "
+                        "model first."
+                    ),
+                    fg="red"
                 )
+
+                return
 
             # Check checkpoint file
             if not os.path.exists(
@@ -575,6 +677,7 @@ def build_multi_ui(parent, state, default_font, header_font):
         start_multi_btn.config(state=tk.DISABLED)
         set_multi_action_buttons(False)
         mr_status.config(text=f"Queued {total} simulations…", fg="black")
+        mr_eta_label.config(text="ETA --:--")
         mr_progress_var.set(0.0)
         state.lock_ui()
 
@@ -700,7 +803,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                         )
 
                         best_conv_val.config(
-                            text="Convergence speed: N/A"
+                            text="Convergence time: N/A"
                         )
 
                     else:
@@ -714,7 +817,7 @@ def build_multi_ui(parent, state, default_font, header_font):
 
                         best_conv_val.config(
                             text=(
-                                f"Convergence speed: "
+                                f"Convergence time: "
                                 f"{best['conv_ms']:.2f} ms"
                             )
                         )
@@ -833,146 +936,914 @@ def build_multi_ui(parent, state, default_font, header_font):
         # Refresh Start button
         validate_multi_ready()
 
-    # ---------- UI ----------
-    tk.Label(parent, text="Multi-Run", font=header_font).grid(row=0, column=0, columnspan=2, sticky="w")
+        # ---------- UI ----------
 
-    # --- Algorithms (multi-select) ---
-    tk.Label(parent, text="Algorithms:", font=default_font).grid(row=1, column=0, sticky="ne")
-    alg_frame = tk.Frame(parent)
-    alg_frame.grid(row=1, column=1, sticky="w")
-    for i, name in enumerate(alg_options):
-        tk.Checkbutton(alg_frame, text=name, variable=alg_vars[name],
-                    command=validate_multi_ready).grid(row=0, column=i, sticky="w")
+    # Build title
+    tk.Label(
+        parent,
+        text="Multi-Run",
+        font=header_font
+    ).grid(
+        row=0,
+        column=0,
+        columnspan=2,
+        sticky="w"
+    )
 
-    # Duration
-    tk.Label(parent, text="Duration (s):", font=default_font).grid(row=2, column=0, sticky="e")
-    mr_duration_entry = tk.Entry(parent, width=10)
-    mr_duration_entry.grid(row=2, column=1, sticky="w")
-    mr_duration_entry.bind("<KeyRelease>", validate_multi_ready)
+    # Build parameters frame
+    parameters_frame = ttk.LabelFrame(
+        parent,
+        text="Parameters"
+    )
 
-    # --- Sources to include ---
-    tk.Label(parent, text="Sources:", font=default_font).grid(row=3, column=0, sticky="ne")
-    srcs = tk.Frame(parent)
-    srcs.grid(row=3, column=1, sticky="w")
-    tk.Checkbutton(srcs, text="Stationary", variable=include_stationary_var,
-               command=toggle_source_widgets).pack(side="left")
-    tk.Checkbutton(srcs, text="WAV", variable=include_wav_var,
-               command=toggle_source_widgets).pack(side="left")
+    parameters_frame.grid(
+        row=1,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
 
-    # --- Stationary colors (multi-select) ---
-    tk.Label(parent, text="Noise Colors:", font=default_font).grid(row=4, column=0, sticky="ne")
-    col_frame = tk.Frame(parent)
-    col_frame.grid(row=4, column=1, sticky="w")
+    # Expand value column
+    parameters_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
 
-    for i, c in enumerate(color_options):
-        cb = tk.Checkbutton(col_frame, text=c, variable=color_vars[c],
-                            command=validate_multi_ready)
-        cb.grid(row=0, column=i, sticky="w")
-        color_cbs[c] = cb
+    # Add algorithm label
+    tk.Label(
+        parameters_frame,
+        text="Algorithms:",
+        font=default_font
+    ).grid(
+        row=0,
+        column=0,
+        sticky="ne"
+    )
 
-    tk.Label(parent, text="Noise WAV(s):", font=default_font).grid(row=5, column=0, sticky="e")
-    wav_select_frame = tk.Frame(parent); wav_select_frame.grid(row=5, column=1, columnspan=2, sticky="ew")
-    mr_wav_btn = tk.Button(wav_select_frame, text="Select WAVs", command=select_wav_files, state=tk.DISABLED)
-    mr_wav_btn.grid(row=0, column=0, sticky="w")
-    mr_wav_label = tk.Label(wav_select_frame, text="No file selected", font=default_font)
-    mr_wav_label.grid(row=0, column=1, sticky="w")
-    parent.after(0, toggle_source_widgets)
+    # Build algorithm frame
+    alg_frame = tk.Frame(
+        parameters_frame
+    )
 
-    # μ grid
-    tk.Label(parent, text="μ min:", font=default_font).grid(row=6, column=0, sticky="e")
-    mu_min_entry = tk.Entry(parent, width=10); mu_min_entry.grid(row=6, column=1, sticky="w")
-    mu_min_entry.bind("<KeyRelease>", validate_multi_ready)
+    alg_frame.grid(
+        row=0,
+        column=1,
+        sticky="w"
+    )
 
-    tk.Label(parent, text="μ max:", font=default_font).grid(row=7, column=0, sticky="e")
-    mu_max_entry = tk.Entry(parent, width=10); mu_max_entry.grid(row=7, column=1, sticky="w")
-    mu_max_entry.bind("<KeyRelease>", validate_multi_ready)
+    # Build algorithm options
+    for index, name in enumerate(
+        alg_options
+    ):
+        tk.Checkbutton(
+            alg_frame,
+            text=name,
+            variable=alg_vars[name],
+            command=update_algorithm_widgets
+        ).grid(
+            row=0,
+            column=index,
+            sticky="w"
+        )
 
-    tk.Label(parent, text="μ steps:", font=default_font).grid(row=8, column=0, sticky="e")
-    mu_steps_entry = tk.Entry(parent, width=10); mu_steps_entry.grid(row=8, column=1, sticky="w")
-    mu_steps_entry.bind("<KeyRelease>", validate_multi_ready)
+    # Add duration label
+    tk.Label(
+        parameters_frame,
+        text="Duration (sec):",
+        font=default_font
+    ).grid(
+        row=1,
+        column=0,
+        sticky="e"
+    )
 
-    tk.Label(parent, text="μ scale:", font=default_font).grid(row=9, column=0, sticky="e")
-    mu_scale_var = tk.StringVar(value="log")
-    mu_scale_menu = ttk.Combobox(parent, textvariable=mu_scale_var, values=["log","linear"], state="readonly", width=8)
-    mu_scale_menu.grid(row=9, column=1, sticky="w")
+    # Build duration entry
+    mr_duration_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
 
-    # L grid
-    tk.Label(parent, text="L min:", font=default_font).grid(row=10, column=0, sticky="e")
-    L_min_entry = tk.Entry(parent, width=10); L_min_entry.grid(row=10, column=1, sticky="w")
-    L_min_entry.bind("<KeyRelease>", validate_multi_ready)
+    mr_duration_entry.grid(
+        row=1,
+        column=1,
+        sticky="w"
+    )
 
-    tk.Label(parent, text="L max:", font=default_font).grid(row=11, column=0, sticky="e")
-    L_max_entry = tk.Entry(parent, width=10); L_max_entry.grid(row=11, column=1, sticky="w")
-    L_max_entry.bind("<KeyRelease>", validate_multi_ready)
+    mr_duration_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
 
-    tk.Label(parent, text="L steps:", font=default_font).grid(row=12, column=0, sticky="e")
-    L_steps_entry = tk.Entry(parent, width=10); L_steps_entry.grid(row=12, column=1, sticky="w")
-    L_steps_entry.bind("<KeyRelease>", validate_multi_ready)
+    # Add sources label
+    tk.Label(
+        parameters_frame,
+        text="Noise Sources:",
+        font=default_font
+    ).grid(
+        row=2,
+        column=0,
+        sticky="ne"
+    )
 
-    # μ–L trade-off
-    tk.Label(parent, text="Metric trade-off factor a:", font=default_font).grid(row=13, column=0, sticky="e")
-    alpha_entry = tk.Entry(parent, width=10)
-    alpha_entry.insert(0, "0.5")
-    alpha_entry.grid(row=13, column=1, sticky="w")
-    alpha_entry.bind("<KeyRelease>", on_alpha_change)
+    # Build sources frame
+    sources_frame = tk.Frame(
+        parameters_frame
+    )
 
-    alpha_info = tk.Label(parent, text="Preference = a * Conv_time + (1-a) * SSE", font=default_font, anchor="w")
-    alpha_info.grid(row=14, column=0, columnspan=2, sticky="w")
+    sources_frame.grid(
+        row=2,
+        column=1,
+        sticky="w"
+    )
 
-    # --- Save Results mode ---
-    tk.Label(parent, text="Save Results:", font=default_font).grid(row=15, column=0, sticky="e")
-    save_mode_var = tk.StringVar(value="All")
-    save_frame = tk.Frame(parent)
-    save_frame.grid(row=15, column=1, sticky="w")
-    for txt in ["None","Best","All"]:
-        tk.Radiobutton(save_frame, text=txt, variable=save_mode_var, value=txt,
-                    command=validate_multi_ready).pack(side="left")
+    # Build stationary option
+    tk.Checkbutton(
+        sources_frame,
+        text="Stationary",
+        variable=include_stationary_var,
+        command=toggle_source_widgets
+    ).pack(
+        side="left"
+    )
 
-    # Progress + status (multi-run)
-    mr_progress_var = tk.DoubleVar(value=0.0)
-    mr_progress = ttk.Progressbar(parent, maximum=100.0, variable=mr_progress_var)
-    mr_progress.grid(row=16, column=0, columnspan=2, sticky="ew")
+    # Build WAV option
+    tk.Checkbutton(
+        sources_frame,
+        text="WAV",
+        variable=include_wav_var,
+        command=toggle_source_widgets
+    ).pack(
+        side="left"
+    )
 
-    mr_status = tk.Label(parent, text="", font=default_font, anchor="w")
-    mr_status.grid(row=17, column=0, columnspan=2, sticky="w")
+    # Add noise-color label
+    tk.Label(
+        parameters_frame,
+        text="Noise Colors:",
+        font=default_font
+    ).grid(
+        row=3,
+        column=0,
+        sticky="ne"
+    )
 
-    mr_exec_label = tk.Label(parent, text="Execution time (sec): ", font=default_font, anchor="w")
-    mr_exec_label.grid(row=18, column=0, columnspan=2, sticky="w")
+    # Build noise-color frame
+    color_frame = tk.Frame(
+        parameters_frame
+    )
 
-    # Best metrics rows
-    best_metrics_frame = tk.Frame(parent)
-    best_metrics_frame.grid(row=19, column=0, rowspan=2, columnspan=2, sticky="ew")
+    color_frame.grid(
+        row=3,
+        column=1,
+        sticky="w"
+    )
 
-    best_mu_val = tk.Label(best_metrics_frame, text="μ:", font=default_font)
-    best_mu_val.grid(row=0, column=0, sticky="w")
+    # Build noise-color options
+    for index, color in enumerate(
+        color_options
+    ):
+        checkbox = tk.Checkbutton(
+            color_frame,
+            text=color,
+            variable=color_vars[color],
+            command=validate_multi_ready
+        )
 
-    best_L_val = tk.Label(best_metrics_frame, text="L:", font=default_font)
-    best_L_val.grid(row=0, column=1, sticky="w")
+        checkbox.grid(
+            row=0,
+            column=index,
+            sticky="w"
+        )
 
-    best_conv_val = tk.Label(best_metrics_frame, text="Convergence speed:", font=default_font)
-    best_conv_val.grid(row=1, column=0, sticky="w")
+        color_cbs[color] = checkbox
 
-    best_sse_val = tk.Label(best_metrics_frame, text="SSE:", font=default_font)
-    best_sse_val.grid(row=1, column=1, sticky="w")
+    # Add WAV label
+    tk.Label(
+        parameters_frame,
+        text="Noise WAV(s):",
+        font=default_font
+    ).grid(
+        row=4,
+        column=0,
+        sticky="e"
+    )
 
-    # Start / Run Best
-    start_multi_btn = tk.Button(parent, text="Start Multi-Run", command=start_multi_run, state=tk.DISABLED)
-    start_multi_btn.grid(row=21, column=0, columnspan=2, sticky="ew")
-    run_best_btn   = tk.Button(parent, text="Run Best (from Multi-Run)",
-                               command=run_best_from_multi, state=tk.DISABLED)
-    run_best_btn.grid(row=22, column=0, columnspan=2, sticky="ew")
+    # Build WAV selection frame
+    wav_select_frame = tk.Frame(
+        parameters_frame
+    )
 
-    plot_row = tk.Frame(parent)
-    plot_row.grid(row=23, column=0, columnspan=3, sticky="ew")
-    plot_row.grid_columnconfigure(0, weight=1)
-    plot_row.grid_columnconfigure(1, weight=1)
-    plot_row.grid_columnconfigure(2, weight=1)
+    wav_select_frame.grid(
+        row=4,
+        column=1,
+        sticky="ew"
+    )
 
-    show_heatmap_btn = tk.Button(plot_row, text="Plot Heatmap", command=show_heatmap, state=tk.DISABLED)
-    show_heatmap_btn.grid(row=0, column=0, sticky="ew")
+    # Expand selected filenames
+    wav_select_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
 
-    show_conv_btn = tk.Button(plot_row, text="Plot Convergence vs μ", command=show_conv_vs_mu, state=tk.DISABLED)
-    show_conv_btn.grid(row=0, column=1, sticky="ew")
+    # Build WAV button
+    mr_wav_btn = tk.Button(
+        wav_select_frame,
+        text="Select WAVs",
+        command=select_wav_files,
+        state=tk.DISABLED
+    )
 
-    show_sse_btn = tk.Button(plot_row, text="Plot SSE vs L", command=show_sse_vs_L, state=tk.DISABLED)
-    show_sse_btn.grid(row=0, column=2, sticky="ew")
+    mr_wav_btn.grid(
+        row=0,
+        column=0,
+        sticky="w"
+    )
+
+    # Show selected WAV files
+    mr_wav_label = tk.Label(
+        wav_select_frame,
+        text="No file selected",
+        font=default_font,
+        anchor="w",
+        wraplength=500
+    )
+
+    mr_wav_label.grid(
+        row=0,
+        column=1,
+        sticky="ew",
+        padx=(5, 0)
+    )
+
+    # Add backend label
+    tk.Label(
+        parameters_frame,
+        text="NN Backend:",
+        font=default_font
+    ).grid(
+        row=5,
+        column=0,
+        sticky="e"
+    )
+
+    # Build backend menu
+    nn_backend_menu = ttk.Combobox(
+        parameters_frame,
+        textvariable=state.nn_backend_var,
+        values=[
+            "PyTorch",
+            "ONNX"
+        ],
+        state=tk.DISABLED,
+        width=10
+    )
+
+    nn_backend_menu.grid(
+        row=5,
+        column=1,
+        sticky="w"
+    )
+
+    # Add model label
+    tk.Label(
+        parameters_frame,
+        text="NN Model:",
+        font=default_font
+    ).grid(
+        row=6,
+        column=0,
+        sticky="e"
+    )
+
+    # Build model selection frame
+    nn_model_frame = tk.Frame(
+        parameters_frame
+    )
+
+    nn_model_frame.grid(
+        row=6,
+        column=1,
+        sticky="ew"
+    )
+
+    # Expand model path
+    nn_model_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
+
+    # Build model button
+    nn_model_btn = tk.Button(
+        nn_model_frame,
+        text="Select Model",
+        command=select_model_file,
+        state=tk.DISABLED
+    )
+
+    nn_model_btn.grid(
+        row=0,
+        column=0,
+        sticky="w"
+    )
+
+    # Show selected model path
+    nn_model_label = tk.Label(
+        nn_model_frame,
+        textvariable=(
+            state.multi_nn_checkpoint_path_var
+        ),
+        font=default_font,
+        anchor="w",
+        wraplength=500
+    )
+
+    nn_model_label.grid(
+        row=0,
+        column=1,
+        sticky="ew",
+        padx=(5, 0)
+    )
+
+    # Add minimum step-size label
+    tk.Label(
+        parameters_frame,
+        text="μ min:",
+        font=default_font
+    ).grid(
+        row=7,
+        column=0,
+        sticky="e"
+    )
+
+    # Build minimum step-size entry
+    mu_min_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    mu_min_entry.grid(
+        row=7,
+        column=1,
+        sticky="w"
+    )
+
+    mu_min_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
+
+    # Add maximum step-size label
+    tk.Label(
+        parameters_frame,
+        text="μ max:",
+        font=default_font
+    ).grid(
+        row=8,
+        column=0,
+        sticky="e"
+    )
+
+    # Build maximum step-size entry
+    mu_max_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    mu_max_entry.grid(
+        row=8,
+        column=1,
+        sticky="w"
+    )
+
+    mu_max_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
+
+    # Add step-count label
+    tk.Label(
+        parameters_frame,
+        text="μ steps:",
+        font=default_font
+    ).grid(
+        row=9,
+        column=0,
+        sticky="e"
+    )
+
+    # Build step-count entry
+    mu_steps_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    mu_steps_entry.grid(
+        row=9,
+        column=1,
+        sticky="w"
+    )
+
+    mu_steps_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
+
+    # Add scale label
+    tk.Label(
+        parameters_frame,
+        text="μ scale:",
+        font=default_font
+    ).grid(
+        row=10,
+        column=0,
+        sticky="e"
+    )
+
+    # Build scale variable
+    mu_scale_var = tk.StringVar(
+        value="log"
+    )
+
+    # Build scale menu
+    mu_scale_menu = ttk.Combobox(
+        parameters_frame,
+        textvariable=mu_scale_var,
+        values=[
+            "log",
+            "linear"
+        ],
+        state="readonly",
+        width=8
+    )
+
+    mu_scale_menu.grid(
+        row=10,
+        column=1,
+        sticky="w"
+    )
+
+    # Add minimum filter-length label
+    tk.Label(
+        parameters_frame,
+        text="L min:",
+        font=default_font
+    ).grid(
+        row=11,
+        column=0,
+        sticky="e"
+    )
+
+    # Build minimum filter-length entry
+    L_min_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    L_min_entry.grid(
+        row=11,
+        column=1,
+        sticky="w"
+    )
+
+    L_min_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
+
+    # Add maximum filter-length label
+    tk.Label(
+        parameters_frame,
+        text="L max:",
+        font=default_font
+    ).grid(
+        row=12,
+        column=0,
+        sticky="e"
+    )
+
+    # Build maximum filter-length entry
+    L_max_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    L_max_entry.grid(
+        row=12,
+        column=1,
+        sticky="w"
+    )
+
+    L_max_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
+
+    # Add filter-length step label
+    tk.Label(
+        parameters_frame,
+        text="L steps:",
+        font=default_font
+    ).grid(
+        row=13,
+        column=0,
+        sticky="e"
+    )
+
+    # Build filter-length step entry
+    L_steps_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    L_steps_entry.grid(
+        row=13,
+        column=1,
+        sticky="w"
+    )
+
+    L_steps_entry.bind(
+        "<KeyRelease>",
+        validate_multi_ready
+    )
+
+    # Add preference-factor label
+    tk.Label(
+        parameters_frame,
+        text="Metric trade-off factor a:",
+        font=default_font
+    ).grid(
+        row=14,
+        column=0,
+        sticky="e"
+    )
+
+    # Build preference-factor entry
+    alpha_entry = tk.Entry(
+        parameters_frame,
+        width=10
+    )
+
+    alpha_entry.insert(
+        0,
+        "0.5"
+    )
+
+    alpha_entry.grid(
+        row=14,
+        column=1,
+        sticky="w"
+    )
+
+    alpha_entry.bind(
+        "<KeyRelease>",
+        on_alpha_change
+    )
+
+    # Build preference description
+    alpha_info = tk.Label(
+        parameters_frame,
+        text=(
+            "Preference = a * Conv_time "
+            "+ (1-a) * SSE"
+        ),
+        font=default_font,
+        anchor="w"
+    )
+
+    alpha_info.grid(
+        row=15,
+        column=0,
+        columnspan=2,
+        sticky="w"
+    )
+
+    # Add save-mode label
+    tk.Label(
+        parameters_frame,
+        text="Save Results:",
+        font=default_font
+    ).grid(
+        row=16,
+        column=0,
+        sticky="e"
+    )
+
+    # Build save-mode variable
+    save_mode_var = tk.StringVar(
+        value="All"
+    )
+
+    # Build save-mode frame
+    save_frame = tk.Frame(
+        parameters_frame
+    )
+
+    save_frame.grid(
+        row=16,
+        column=1,
+        sticky="w"
+    )
+
+    # Build save-mode options
+    for text in [
+        "None",
+        "Best",
+        "All"
+    ]:
+        tk.Radiobutton(
+            save_frame,
+            text=text,
+            variable=save_mode_var,
+            value=text,
+            command=validate_multi_ready
+        ).pack(
+            side="left"
+        )
+
+    # Build progress frame
+    progress_frame = ttk.LabelFrame(
+        parent,
+        text="Progress"
+    )
+
+    progress_frame.grid(
+        row=2,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Expand progress frame
+    progress_frame.grid_columnconfigure(
+        0,
+        weight=1
+    )
+
+    # Build progress value
+    mr_progress_var = tk.DoubleVar(
+        value=0.0
+    )
+
+    # Build progress bar
+    mr_progress = ttk.Progressbar(
+        progress_frame,
+        maximum=100.0,
+        variable=mr_progress_var
+    )
+
+    mr_progress.grid(
+        row=0,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build ETA label
+    mr_eta_label = tk.Label(
+        progress_frame,
+        text="ETA --:--",
+        font=default_font,
+        anchor="w"
+    )
+
+    mr_eta_label.grid(
+        row=1,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build status label
+    mr_status = tk.Label(
+        progress_frame,
+        text="",
+        font=default_font,
+        anchor="w"
+    )
+
+    mr_status.grid(
+        row=2,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build metrics frame
+    metrics_frame = ttk.LabelFrame(
+        parent,
+        text="Metrics"
+    )
+
+    metrics_frame.grid(
+        row=3,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Use equal metric columns
+    metrics_frame.grid_columnconfigure(
+        0,
+        weight=1
+    )
+
+    metrics_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
+
+    # Build execution-time label
+    mr_exec_label = tk.Label(
+        metrics_frame,
+        text="Execution time (sec):",
+        font=default_font,
+        anchor="w"
+    )
+
+    mr_exec_label.grid(
+        row=0,
+        column=0,
+        columnspan=2,
+        sticky="w"
+    )
+
+    # Build best step-size value
+    best_mu_val = tk.Label(
+        metrics_frame,
+        text="μ:",
+        font=default_font
+    )
+
+    best_mu_val.grid(
+        row=1,
+        column=0,
+        sticky="w"
+    )
+
+    # Build best filter-length value
+    best_L_val = tk.Label(
+        metrics_frame,
+        text="L:",
+        font=default_font
+    )
+
+    best_L_val.grid(
+        row=1,
+        column=1,
+        sticky="w"
+    )
+
+    # Build convergence value
+    best_conv_val = tk.Label(
+        metrics_frame,
+        text="Convergence time:",
+        font=default_font
+    )
+
+    best_conv_val.grid(
+        row=2,
+        column=0,
+        sticky="w"
+    )
+
+    # Build SSE value
+    best_sse_val = tk.Label(
+        metrics_frame,
+        text="SSE:",
+        font=default_font
+    )
+
+    best_sse_val.grid(
+        row=2,
+        column=1,
+        sticky="w"
+    )
+
+    # Build simulation frame
+    simulation_frame = ttk.LabelFrame(
+        parent,
+        text="Run Simulation"
+    )
+
+    simulation_frame.grid(
+        row=4,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Expand simulation buttons
+    simulation_frame.grid_columnconfigure(
+        0,
+        weight=1
+    )
+
+    # Build Multi Run button
+    start_multi_btn = tk.Button(
+        simulation_frame,
+        text="Start Multi-Run",
+        command=start_multi_run,
+        state=tk.DISABLED
+    )
+
+    start_multi_btn.grid(
+        row=0,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build Run Best button
+    run_best_btn = tk.Button(
+        simulation_frame,
+        text="Run Best (from Multi-Run)",
+        command=run_best_from_multi,
+        state=tk.DISABLED
+    )
+
+    run_best_btn.grid(
+        row=1,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build plots frame
+    plots_frame = ttk.LabelFrame(
+        parent,
+        text="Plots"
+    )
+
+    plots_frame.grid(
+        row=5,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Use equal plot widths
+    for column in range(3):
+        plots_frame.grid_columnconfigure(
+            column,
+            weight=1,
+            uniform="multi_plot_buttons"
+        )
+
+    # Build heatmap button
+    show_heatmap_btn = tk.Button(
+        plots_frame,
+        text="Plot Heatmap",
+        command=show_heatmap,
+        state=tk.DISABLED
+    )
+
+    show_heatmap_btn.grid(
+        row=0,
+        column=0,
+        sticky="ew"
+    )
+
+    # Build convergence plot button
+    show_conv_btn = tk.Button(
+        plots_frame,
+        text="Plot Convergence vs μ",
+        command=show_conv_vs_mu,
+        state=tk.DISABLED
+    )
+
+    show_conv_btn.grid(
+        row=0,
+        column=1,
+        sticky="ew"
+    )
+
+    # Build SSE plot button
+    show_sse_btn = tk.Button(
+        plots_frame,
+        text="Plot SSE vs L",
+        command=show_sse_vs_L,
+        state=tk.DISABLED
+    )
+
+    show_sse_btn.grid(
+        row=0,
+        column=2,
+        sticky="ew"
+    )
+
+    # Initialize source widgets
+    parent.after(
+        0,
+        toggle_source_widgets
+    )
+
+    # Initialize algorithm widgets
+    parent.after(
+        0,
+        update_algorithm_widgets
+    )

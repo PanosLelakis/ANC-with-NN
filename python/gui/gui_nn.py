@@ -11,7 +11,9 @@ from engine.engine_nn import (
     export_onnx_model
 )
 from utils.plot import plot_training_history
-from neural.nn_logger import get_training_history_path
+from neural.checkpoints import (
+    get_latest_checkpoint_path
+)
 
 def build_nn_ui(parent, state, default_font, header_font):
     # Widget references
@@ -25,7 +27,7 @@ def build_nn_ui(parent, state, default_font, header_font):
     build_dataset_frame(parent, state, default_font, callbacks)
     build_model_frame(parent, state, default_font)
     build_training_frame(parent, state, default_font, callbacks)
-    build_validation_frame(parent, state, default_font, widgets, callbacks)
+    build_validation_frame(parent, default_font, widgets, callbacks)
     build_progress_frame(parent, default_font, widgets)
 
 def build_nn_callbacks(state, widgets):
@@ -49,7 +51,18 @@ def build_nn_callbacks(state, widgets):
 
         if path:
             state.nn_checkpoint_path_var.set(path)
-            widgets["checkpoint_label"].config(text=os.path.basename(path))
+            # Read model folder
+            model_folder = os.path.basename(
+                os.path.dirname(path)
+            )
+
+            # Show model and checkpoint
+            widgets["checkpoint_label"].config(
+                text=(
+                    f"{model_folder}/"
+                    f"{os.path.basename(path)}"
+                )
+            )
 
     def preprocess_clicked():
         # Reset progress
@@ -120,6 +133,7 @@ def build_nn_callbacks(state, widgets):
         
         # Training config
         config = {
+            "architecture": "deep_anc_original",  # Train reference Deep ANC CRN
             "processed_root": state.nn_processed_root_var.get(),
             "target_fs": state.nn_target_fs_var.get(),
             "conv_layers": state.nn_conv_layers_var.get(),
@@ -180,6 +194,34 @@ def build_nn_callbacks(state, widgets):
                         text=result["message"],
                         fg="green"
                     )
+                    # Select the new best checkpoint
+                    best_checkpoint = result[
+                        "best_checkpoint"
+                    ]
+
+                    state.nn_checkpoint_path_var.set(
+                        best_checkpoint
+                    )
+
+                    # Store model for Single Run
+                    state.single_nn_checkpoint_path_var.set(
+                        best_checkpoint
+                    )
+
+                    # Store model for Multi Run
+                    state.multi_nn_checkpoint_path_var.set(
+                        best_checkpoint
+                    )
+
+                    model_name = os.path.basename(
+                        os.path.dirname(
+                            best_checkpoint
+                        )
+                    )
+
+                    widgets["checkpoint_label"].config(
+                        text=f"{model_name}/best.pt"
+                    )
                 else:
                     widgets["status_label"].config(
                         text=result["message"],
@@ -204,11 +246,20 @@ def build_nn_callbacks(state, widgets):
 
         # Use default best checkpoint
         if not checkpoint_path:
-            checkpoint_path = os.path.join(
-                state.nn_processed_root_var.get(),
-                "checkpoints",
-                "best.pt"
+            checkpoint_path = (
+                get_latest_checkpoint_path()
             )
+
+        if not checkpoint_path:
+            widgets["status_label"].config(
+                text=(
+                    "No trained model found "
+                    "in the models folder."
+                ),
+                fg="red"
+            )
+
+            return
 
         # Validation request
         result = run_validation(
@@ -227,32 +278,57 @@ def build_nn_callbacks(state, widgets):
             widgets["status_label"].config(text=result["message"], fg="red")
 
     def plot_training_history_clicked():
-        # Read training history path
-        history_path = (
-            get_training_history_path()
+        # Read selected checkpoint
+        checkpoint_path = (
+            state.nn_checkpoint_path_var
+            .get()
+            .strip()
+        )
+
+        # Use latest checkpoint when empty
+        if not checkpoint_path:
+            checkpoint_path = (
+                get_latest_checkpoint_path()
+            )
+
+        # Stop without checkpoint
+        if not checkpoint_path:
+            widgets["status_label"].config(
+                text="Select a checkpoint first.",
+                fg="red"
+            )
+
+            return
+
+        # Build matching history path
+        history_path = os.path.join(
+            os.path.dirname(
+                checkpoint_path
+            ),
+            "training_history.csv"
         )
 
         try:
-            # Plot training history
+            # Plot selected history
             plot_training_history(
                 history_path
             )
 
-            # Show plot status
+            # Show loaded history
             widgets["status_label"].config(
                 text=(
-                    f"Training history loaded from: "
-                    f"{history_path}"
+                    "Training history path "
+                    f": {history_path}"
                 ),
                 fg="green"
             )
 
         except Exception as error:
-            # Show plot error
+            # Show history error
             widgets["status_label"].config(
                 text=(
-                    f"Training history plot error: "
-                    f"{error}"
+                    "Training history plot "
+                    f"error: {error}"
                 ),
                 fg="red"
             )
@@ -261,13 +337,23 @@ def build_nn_callbacks(state, widgets):
         # Read selected checkpoint
         checkpoint_path = state.nn_checkpoint_path_var.get().strip()
 
-        # Use default best checkpoint
+        # Use latest trained model
         if not checkpoint_path:
-            checkpoint_path = os.path.join(
-                state.nn_processed_root_var.get(),
-                "checkpoints",
-                "best.pt"
+            checkpoint_path = (
+                get_latest_checkpoint_path()
             )
+
+        # Check available model
+        if not checkpoint_path:
+            widgets["status_label"].config(
+                text=(
+                    "No trained model found "
+                    "in the models folder."
+                ),
+                fg="red"
+            )
+
+            return
 
         # Reset progress
         widgets["progress_var"].set(0.0)
@@ -365,7 +451,7 @@ def build_dataset_frame(parent, state, default_font, callbacks):
         width=10
     ).grid(row=2, column=1, sticky="w")
 
-    tk.Label(dataset_frame, text="Crop duration:", font=default_font).grid(
+    tk.Label(dataset_frame, text="Crop duration (sec):", font=default_font).grid(
         row=3, column=0, sticky="e"
     )
 
@@ -381,131 +467,296 @@ def build_dataset_frame(parent, state, default_font, callbacks):
         command=callbacks["preprocess_clicked"]
     ).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(4, 0))
 
-def build_model_frame(parent, state, default_font):
+def build_model_frame(
+    parent,
+    state,
+    default_font
+):
     # Model frame
-    model_frame = ttk.LabelFrame(parent, text="Model")
-    model_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
-
-    tk.Label(model_frame, text="Architecture:", font=default_font).grid(
-        row=0, column=0, sticky="e"
-    )
-    tk.Label(model_frame, text="Simplified CRN", font=default_font).grid(
-        row=0, column=1, sticky="w", padx=(0, 20)
+    model_frame = ttk.LabelFrame(
+        parent,
+        text="Model"
     )
 
-    tk.Label(model_frame, text="Delay M:", font=default_font).grid(
-        row=0, column=2, sticky="e"
+    model_frame.grid(
+        row=2,
+        column=0,
+        columnspan=3,
+        sticky="ew",
+        padx=5,
+        pady=5
     )
+
+    # Expand input column
+    model_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
+
+    tk.Label(
+        model_frame,
+        text="Architecture:",
+        font=default_font
+    ).grid(
+        row=0,
+        column=0,
+        sticky="e"
+    )
+
+    tk.Label(  # Show fixed model architecture
+        model_frame,  # Parent frame
+        text="Deep ANC Original CRNN",  # Reference architecture
+        font=default_font  # Standard GUI font
+    ).grid(
+        row=0,
+        column=1,
+        sticky="w"
+    )
+
+    tk.Label(
+        model_frame,
+        text="Delay M:",
+        font=default_font
+    ).grid(
+        row=1,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         model_frame,
         textvariable=state.nn_delay_m_var,
-        width=10
-    ).grid(row=0, column=3, sticky="w")
-
-    tk.Label(model_frame, text="Conv layers:", font=default_font).grid(
-        row=1, column=0, sticky="e"
+        width=20
+    ).grid(
+        row=1,
+        column=1,
+        sticky="w"
     )
+
+    tk.Label(
+        model_frame,
+        text="Conv layers:",
+        font=default_font
+    ).grid(
+        row=2,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         model_frame,
         textvariable=state.nn_conv_layers_var,
-        width=10
-    ).grid(row=1, column=1, sticky="w", padx=(0, 20))
-
-    tk.Label(model_frame, text="Conv channels:", font=default_font).grid(
-        row=1, column=2, sticky="e"
+        width=20
+    ).grid(
+        row=2,
+        column=1,
+        sticky="w"
     )
+
+    tk.Label(
+        model_frame,
+        text="Conv channels:",
+        font=default_font
+    ).grid(
+        row=3,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         model_frame,
         textvariable=state.nn_conv_channels_var,
-        width=10
-    ).grid(row=1, column=3, sticky="w")
-
-    tk.Label(model_frame, text="LSTM layers:", font=default_font).grid(
-        row=2, column=0, sticky="e"
+        width=20
+    ).grid(
+        row=3,
+        column=1,
+        sticky="w"
     )
+
+    tk.Label(
+        model_frame,
+        text="LSTM layers:",
+        font=default_font
+    ).grid(
+        row=4,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         model_frame,
         textvariable=state.nn_lstm_layers_var,
-        width=10
-    ).grid(row=2, column=1, sticky="w", padx=(0, 20))
-
-    tk.Label(model_frame, text="LSTM hidden:", font=default_font).grid(
-        row=2, column=2, sticky="e"
+        width=20
+    ).grid(
+        row=4,
+        column=1,
+        sticky="w"
     )
+
+    tk.Label(
+        model_frame,
+        text="LSTM hidden:",
+        font=default_font
+    ).grid(
+        row=5,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         model_frame,
         textvariable=state.nn_lstm_hidden_var,
-        width=10
-    ).grid(row=2, column=3, sticky="w")
-
-def build_training_frame(parent, state, default_font, callbacks):
-    # Training frame
-    training_frame = ttk.LabelFrame(parent, text="Training")
-    training_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
-
-    training_frame.grid_columnconfigure(1, weight=1)
-    training_frame.grid_columnconfigure(3, weight=1)
-
-    tk.Label(training_frame, text="Epochs:", font=default_font).grid(
-        row=0, column=0, sticky="e"
+        width=20
+    ).grid(
+        row=5,
+        column=1,
+        sticky="w"
     )
+
+def build_training_frame(
+    parent,
+    state,
+    default_font,
+    callbacks
+):
+    # Training frame
+    training_frame = ttk.LabelFrame(
+        parent,
+        text="Training"
+    )
+
+    training_frame.grid(
+        row=3,
+        column=0,
+        columnspan=3,
+        sticky="ew",
+        padx=5,
+        pady=5
+    )
+
+    # Expand input column
+    training_frame.grid_columnconfigure(
+        1,
+        weight=1
+    )
+
+    tk.Label(
+        training_frame,
+        text="Epochs:",
+        font=default_font
+    ).grid(
+        row=0,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         training_frame,
         textvariable=state.nn_epochs_var,
         width=10
-    ).grid(row=0, column=1, sticky="w", padx=(0, 20))
-
-    tk.Label(training_frame, text="Batch size:", font=default_font).grid(
-        row=0, column=2, sticky="e"
+    ).grid(
+        row=0,
+        column=1,
+        sticky="w"
     )
+
+    tk.Label(
+        training_frame,
+        text="Batch size:",
+        font=default_font
+    ).grid(
+        row=1,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         training_frame,
         textvariable=state.nn_batch_size_var,
         width=10
-    ).grid(row=0, column=3, sticky="w")
-
-    tk.Label(training_frame, text="Learning rate:", font=default_font).grid(
-        row=1, column=0, sticky="e"
+    ).grid(
+        row=1,
+        column=1,
+        sticky="w"
     )
+
+    tk.Label(
+        training_frame,
+        text="Learning rate:",
+        font=default_font
+    ).grid(
+        row=2,
+        column=0,
+        sticky="e"
+    )
+
     tk.Entry(
         training_frame,
         textvariable=state.nn_lr_var,
         width=10
-    ).grid(row=1, column=1, sticky="w", padx=(0, 20))
+    ).grid(
+        row=2,
+        column=1,
+        sticky="w"
+    )
 
-    tk.Label(training_frame, text="Optimizer:", font=default_font).grid(
-        row=1, column=2, sticky="e"
+    tk.Label(
+        training_frame,
+        text="Optimizer:",
+        font=default_font
+    ).grid(
+        row=3,
+        column=0,
+        sticky="e"
     )
 
     ttk.Combobox(
         training_frame,
         textvariable=state.nn_optimizer_var,
-        values=["AMSGrad", "Adam"],
+        values=[
+            "AMSGrad",
+            "Adam"
+        ],
         state="readonly",
         width=10
-    ).grid(row=1, column=3, sticky="w")
+    ).grid(
+        row=3,
+        column=1,
+        sticky="w"
+    )
 
     tk.Button(
         training_frame,
         text="Start Training",
-        command=callbacks["start_training_clicked"]
-    ).grid(row=2, column=0, columnspan=4, sticky="ew", pady=(4, 0))
-
-    tk.Button(
-        training_frame,
-        text="Plot Training & Validation Loss",
         command=callbacks[
-            "plot_training_history_clicked"
+            "start_training_clicked"
         ]
     ).grid(
-        row=3,
+        row=4,
         column=0,
-        columnspan=4,
+        columnspan=2,
         sticky="ew",
         pady=(4, 0)
     )
 
-def build_validation_frame(parent, state, default_font, widgets, callbacks):
+    tk.Button(
+        training_frame,
+        text=(
+            "Plot Training & "
+            "Validation Loss"
+        ),
+        command=callbacks[
+            "plot_training_history_clicked"
+        ]
+    ).grid(
+        row=5,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        pady=(4, 0)
+    )
+
+def build_validation_frame(parent, default_font, widgets, callbacks):
     # Validation frame
     validation_frame = ttk.LabelFrame(parent, text="Validation")
     validation_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
