@@ -1,2 +1,0 @@
-﻿sep=,
-run_kind,algorithm,noise_source,noise_label,L,mu,score,conv_ms,sse_db,power_anc_off,power_anc_on,attenuation_db,divergence,status,save_path,avg_pnc_dbr,band_attenuation
