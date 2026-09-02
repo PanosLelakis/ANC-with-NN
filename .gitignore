@@ -22,3 +22,14 @@ trimmed
 trimmed_selection
 old models
 *.pt
+algorithm_performance_range_latex.txt
+algorithm_performance_range.csv
+anc_run_log.csv
+best_by_combo.csv
+best_by_noise.csv
+divergence_cases.csv
+noise_impact_1_latex.txt
+noise_impact_1.csv
+noise_impact_2_latex.txt
+noise_impact_2.csv
+top10_results.csv
