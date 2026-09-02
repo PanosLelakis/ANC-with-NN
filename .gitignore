@@ -33,3 +33,4 @@ noise_impact_1.csv
 noise_impact_2_latex.txt
 noise_impact_2.csv
 top10_results.csv
+*.pdf
