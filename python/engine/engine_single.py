@@ -405,6 +405,10 @@ def run_neural_anc_single(
     # Reference signal is zero
     reference_signal = np.zeros(N, dtype=np.float32)
 
+    # Keep the input normalization gain so external comparisons can restore
+    # the controller output to the original acoustic input scale.
+    input_scale = 1.0
+
     # Generate noise for Single Run
     if preloaded_noise is None:
         noise = make_noise(
@@ -448,10 +452,11 @@ def run_neural_anc_single(
         # Normalize after resampling
         noise = noise.astype(np.float32)
 
-        noise /= np.sqrt(
+        input_scale = float(np.sqrt(
             np.mean(noise ** 2)
             + 1e-12
-        )
+        ))
+        noise /= input_scale
 
     # Input signal for neural controller
     noisy_signal = generate_noisy_signal(reference_signal, noise).astype(np.float32)
@@ -501,6 +506,13 @@ def run_neural_anc_single(
     corrected_a = (
         a
         - a0
+    )
+
+    # Expose the calibrated controller output before the secondary path.
+    # The comparison script can apply the original path at its native rate.
+    controller_output = (
+        (signals["y"] - zero_signals["y"]).squeeze(0)
+        .detach().cpu().numpy().astype(np.float32)
     )
 
     # Compute zero-input corrected residual
@@ -611,6 +623,10 @@ def run_neural_anc_single(
         # Signals after paths
         "d": primary_output_raw,
         "z": secondary_output_raw,
+
+        # Controller output before the secondary path, at the NN rate.
+        "controller_output": controller_output[:N],
+        "input_scale": input_scale,
 
         # Signals used for playback and saving
         "before_raw": primary_output_raw,

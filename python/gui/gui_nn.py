@@ -133,7 +133,11 @@ def build_nn_callbacks(state, widgets):
         
         # Training config
         config = {
-            "architecture": "deep_anc_original",  # Train reference Deep ANC CRN
+            "architecture": (
+                "deep_anc_original"
+                if state.nn_architecture_var.get() == "Original"
+                else "simple_crn"
+            ),
             "processed_root": state.nn_processed_root_var.get(),
             "target_fs": state.nn_target_fs_var.get(),
             "conv_layers": state.nn_conv_layers_var.get(),
@@ -493,6 +497,7 @@ def build_model_frame(
         weight=1
     )
 
+    # Architecture label
     tk.Label(
         model_frame,
         text="Architecture:",
@@ -503,16 +508,22 @@ def build_model_frame(
         sticky="e"
     )
 
-    tk.Label(  # Show fixed model architecture
-        model_frame,  # Parent frame
-        text="Deep ANC Original CRNN",  # Reference architecture
-        font=default_font  # Standard GUI font
-    ).grid(
+    # Architecture dropdown
+    architecture_menu = ttk.Combobox(
+        model_frame,
+        textvariable=state.nn_architecture_var,
+        values=("Original", "Custom"),
+        state="readonly",
+        width=18
+    )
+
+    architecture_menu.grid(
         row=0,
         column=1,
         sticky="w"
     )
 
+    # Delay label
     tk.Label(
         model_frame,
         text="Delay M:",
@@ -523,16 +534,20 @@ def build_model_frame(
         sticky="e"
     )
 
-    tk.Entry(
+    # Delay entry
+    delay_entry = tk.Entry(
         model_frame,
         textvariable=state.nn_delay_m_var,
         width=20
-    ).grid(
+    )
+
+    delay_entry.grid(
         row=1,
         column=1,
         sticky="w"
     )
 
+    # Convolutional layers label
     tk.Label(
         model_frame,
         text="Conv layers:",
@@ -543,16 +558,20 @@ def build_model_frame(
         sticky="e"
     )
 
-    tk.Entry(
+    # Convolutional layers entry
+    conv_layers_entry = tk.Entry(
         model_frame,
         textvariable=state.nn_conv_layers_var,
         width=20
-    ).grid(
+    )
+
+    conv_layers_entry.grid(
         row=2,
         column=1,
         sticky="w"
     )
 
+    # Convolutional channels label
     tk.Label(
         model_frame,
         text="Conv channels:",
@@ -563,16 +582,20 @@ def build_model_frame(
         sticky="e"
     )
 
-    tk.Entry(
+    # Convolutional channels entry
+    conv_channels_entry = tk.Entry(
         model_frame,
         textvariable=state.nn_conv_channels_var,
         width=20
-    ).grid(
+    )
+
+    conv_channels_entry.grid(
         row=3,
         column=1,
         sticky="w"
     )
 
+    # LSTM layers label
     tk.Label(
         model_frame,
         text="LSTM layers:",
@@ -583,16 +606,20 @@ def build_model_frame(
         sticky="e"
     )
 
-    tk.Entry(
+    # LSTM layers entry
+    lstm_layers_entry = tk.Entry(
         model_frame,
         textvariable=state.nn_lstm_layers_var,
         width=20
-    ).grid(
+    )
+
+    lstm_layers_entry.grid(
         row=4,
         column=1,
         sticky="w"
     )
 
+    # LSTM hidden size label
     tk.Label(
         model_frame,
         text="LSTM hidden:",
@@ -603,15 +630,63 @@ def build_model_frame(
         sticky="e"
     )
 
-    tk.Entry(
+    # LSTM hidden size entry
+    lstm_hidden_entry = tk.Entry(
         model_frame,
         textvariable=state.nn_lstm_hidden_var,
         width=20
-    ).grid(
+    )
+
+    lstm_hidden_entry.grid(
         row=5,
         column=1,
         sticky="w"
     )
+
+    # Entries controlled by architecture selection
+    architecture_entries = (
+        conv_layers_entry,
+        conv_channels_entry,
+        lstm_layers_entry,
+        lstm_hidden_entry
+    )
+
+    def update_architecture_fields(*_):
+        # Check selected architecture
+        is_original = (
+            state.nn_architecture_var.get()
+            == "Original"
+        )
+
+        if is_original:
+            # Restore original Deep ANC values
+            state.nn_conv_layers_var.set("5")
+            state.nn_conv_channels_var.set(
+                "16,32,64,128,256"
+            )
+            state.nn_lstm_layers_var.set("2")
+            state.nn_lstm_hidden_var.set("1024")
+
+        # Lock original architecture or unlock custom architecture
+        entry_state = (
+            "readonly"
+            if is_original
+            else tk.NORMAL
+        )
+
+        for entry in architecture_entries:
+            entry.config(
+                state=entry_state
+            )
+
+    # Update fields when architecture changes
+    architecture_menu.bind(
+        "<<ComboboxSelected>>",
+        update_architecture_fields
+    )
+
+    # Apply initial state
+    update_architecture_fields()
 
 def build_training_frame(
     parent,

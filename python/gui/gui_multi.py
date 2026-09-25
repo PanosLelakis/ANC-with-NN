@@ -18,6 +18,7 @@ def build_multi_ui(parent, state, default_font, header_font):
     ranked = None
     mu_vals = None
     L_vals = None
+    last_mu_scale = "log"
 
     # --- Multi-select controls state ---
     alg_options = ["LMS","NLMS","FxLMS","FxNLMS", "Neural Network"]
@@ -379,7 +380,7 @@ def build_multi_ui(parent, state, default_font, header_font):
         except Exception as e:
             mr_status.config(text=f"Heatmap error: {e}", fg="red")
 
-    def show_combo_plot(plot_function):
+    def show_combo_plot(plot_function, **plot_kwargs):
         # Check available results
         if not ranked:
             # Show missing result message
@@ -406,7 +407,8 @@ def build_multi_ui(parent, state, default_font, header_font):
                     rows,
                     save_dir=None,
                     algorithm_name=algorithm,
-                    noise_type=noise_label
+                    noise_type=noise_label,
+                    **plot_kwargs
                 )
 
         except Exception as error:
@@ -418,7 +420,10 @@ def build_multi_ui(parent, state, default_font, header_font):
 
     def show_conv_vs_mu():
         # Plot convergence against mu
-        show_combo_plot(plot_convtime_vs_mu)
+        show_combo_plot(
+            plot_convtime_vs_mu,
+            mu_scale=last_mu_scale
+        )
 
     def show_sse_vs_L():
         # Plot SSE against L
@@ -531,7 +536,7 @@ def build_multi_ui(parent, state, default_font, header_font):
         validate_multi_ready()
 
     def start_multi_run():
-        nonlocal mu_vals, L_vals, ranked
+        nonlocal mu_vals, L_vals, ranked, last_mu_scale
 
         # Read validated selections
         selection = read_multi_selection()
@@ -556,6 +561,7 @@ def build_multi_ui(parent, state, default_font, header_font):
         dur = values["duration"]
         mode = values["save_mode"]
         alpha = values["alpha"]
+        last_mu_scale = values["mu_scale"]
 
         # Build adaptive parameter grid
         if require_adaptive:
@@ -566,7 +572,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                 L_min=values["L_min"],
                 L_max=values["L_max"],
                 L_steps=values["L_steps"],
-                mu_scale=values["mu_scale"]
+                mu_scale=last_mu_scale
             )
 
         # Use placeholder grid for NN only
@@ -728,6 +734,7 @@ def build_multi_ui(parent, state, default_font, header_font):
                     save_mode=mode,
                     results_root=results_root,
                     paths=state.anc_paths,
+                    mu_scale=last_mu_scale,
                     progress_callback=progress_callback,
                     save_progress_callback=save_progress_callback,
                     nn_checkpoint_path=nn_checkpoint_path,

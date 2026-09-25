@@ -752,7 +752,8 @@ def save_one_combo_summary(
     combination,
     mu_values,
     L_values,
-    results_root
+    results_root,
+    mu_scale
 ):
     # Unpack combination
     algorithm, source, noise_label, _ = combination
@@ -793,7 +794,8 @@ def save_one_combo_summary(
         combination_results,
         save_dir=output_folder,
         algorithm_name=algorithm,
-        noise_type=noise_label
+        noise_type=noise_label,
+        mu_scale=mu_scale
     )
 
     # Save SSE plot
@@ -809,7 +811,8 @@ def save_combo_summary_plots(
     combinations,
     mu_values,
     L_values,
-    results_root
+    results_root,
+    mu_scale
 ):
     # Find unique combinations
     unique_combinations = get_unique_combinations(combinations)
@@ -822,7 +825,8 @@ def save_combo_summary_plots(
             combination=combination,
             mu_values=mu_values,
             L_values=L_values,
-            results_root=results_root
+            results_root=results_root,
+            mu_scale=mu_scale
         )
 
 def run_multi_sim(
@@ -835,6 +839,7 @@ def run_multi_sim(
     save_mode,
     results_root,
     paths,
+    mu_scale,
     progress_callback=None,
     save_progress_callback=None,
     nn_checkpoint_path=None,
@@ -1056,6 +1061,7 @@ def run_multi_sim(
             results_root=results_root,
             noise_bank=noise_bank,
             paths=paths,
+            mu_scale=mu_scale,
             progress_callback=save_progress_callback,
             nn_checkpoint_path=nn_checkpoint_path,
             nn_backend=nn_backend
@@ -1069,7 +1075,8 @@ def run_multi_sim(
             combinations=combinations,
             mu_values=mu_values,
             L_values=L_values,
-            results_root=results_root
+            results_root=results_root,
+            mu_scale=mu_scale
         )
 
     # Compute execution time
@@ -1165,19 +1172,29 @@ def save_best_case_error(best_result, results_root, error):
     # Read noise label
     noise_label = best_result.get("noise_label", "")
 
-    # Read filter length
-    L = int(best_result.get("L"))
+    # Read filter parameters
+    if algorithm == "Neural Network":
+        L = 0
+        mu = 0.0
+    else:
+        L = int(best_result.get("L"))
+        mu = float(best_result.get("mu"))
 
-    # Read step size
-    mu = float(best_result.get("mu"))
-
-    # Build result folder
-    output_folder = os.path.join(
+    # Build noise result folder
+    noise_folder = os.path.join(
         results_root,
         algorithm,
-        safe_name(noise_label),
-        f"L{L}_mu{mu:.6g}"
+        safe_name(noise_label)
     )
+
+    # Neural Network has no L-mu folder
+    if algorithm == "Neural Network":
+        output_folder = noise_folder
+    else:
+        output_folder = os.path.join(
+            noise_folder,
+            f"L{L}_mu{mu:.6g}"
+        )
 
     # Create result folder
     os.makedirs(output_folder, exist_ok=True)
@@ -1240,6 +1257,7 @@ def save_best_results(
     results_root,
     noise_bank,
     paths,
+    mu_scale,
     progress_callback=None,
     nn_checkpoint_path=None,
     nn_backend="pytorch"
@@ -1268,7 +1286,8 @@ def save_best_results(
                 combination=combination,
                 mu_values=mu_values,
                 L_values=L_values,
-                results_root=results_root
+                results_root=results_root,
+                mu_scale=mu_scale
             )
 
         except Exception as error:

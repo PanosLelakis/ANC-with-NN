@@ -7,6 +7,8 @@ from utils.smoothing import whittaker_eilers_smooth, smooth_fractional_octave_db
 from utils.convert_to_db import val_to_dbr
 from utils.fft_transform import compute_fft
 from utils.performance_metrics import DEFAULT_BANDS, compute_band_attenuation
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 
 PLOT_FORMAT = "pdf" # change noise_spectrogram extension in result_saver.py as well
 
@@ -496,79 +498,303 @@ def plot_band_attenuation(d_signal, e_signal, fs, bands=None, bands_str="", save
     dispose_fig(fig1, plt, save_dir)
 
 def plot_hparam_heatmap(ranked, mu_vals, L_vals, save_dir=None):
-    score = np.full((len(L_vals), len(mu_vals)), np.nan, dtype=float)
-    
+    # Score of non-divergent simulations
+    score = np.full(
+        (len(L_vals), len(mu_vals)),
+        np.nan,
+        dtype=float
+    )
+
+    # Separate mask for divergent simulations
+    diverged = np.zeros(
+        (len(L_vals), len(mu_vals)),
+        dtype=bool
+    )
+
     for r in ranked:
         L = int(r["L"])
         mu = float(r["mu"])
+
         try:
             i = np.where(L_vals == L)[0][0]
             j = np.where(np.isclose(mu_vals, mu))[0][0]
-            score[i, j] = r["score"]
-        except Exception:
+
+            is_diverged = (
+                bool(r.get("divergence", False))
+                or str(r.get("status", "")).strip().lower() == "diverged"
+            )
+
+            diverged[i, j] = is_diverged
+
+            # Do not include the divergence penalty in the color scale
+            if not is_diverged:
+                score[i, j] = float(r["score"])
+
+        except (IndexError, KeyError, TypeError, ValueError):
             pass
 
     fig1, plt = _new_fig(headless=bool(save_dir))
     ax = fig1.gca()
-    
-    #im = ax.imshow(score, aspect="auto", origin="lower",
-                   #extent=[0, len(mu_vals)-1, 0, len(L_vals)-1])
-    # cell-centered extent: always has non-zero span even for n=1
-    extent = [-0.5, len(mu_vals) - 0.5, -0.5, len(L_vals) - 0.5]
-    
-    im = ax.imshow(score, aspect="auto", origin="lower", extent=extent)
-    beautify_plot(ax, "Hyperparameter Score (lower is better)", "mu", "L", None, None, None, None)
-    fig1.colorbar(im, label="score")
-    
+
+    extent = [
+        -0.5,
+        len(mu_vals) - 0.5,
+        -0.5,
+        len(L_vals) - 0.5
+    ]
+
+    # Plot only non-divergent scores using the normal color scale
+    normal_scores = np.ma.masked_invalid(score)
+
+    im = ax.imshow(
+        normal_scores,
+        aspect="auto",
+        origin="lower",
+        extent=extent,
+        cmap="viridis"
+    )
+
+    # Overlay divergent simulations using a separate red color
+    if np.any(diverged):
+        divergence_overlay = np.ma.masked_where(
+            ~diverged,
+            np.ones_like(score, dtype=float)
+        )
+
+        divergence_cmap = ListedColormap(["#d62728"])
+        divergence_cmap.set_bad((0, 0, 0, 0))
+
+        ax.imshow(
+            divergence_overlay,
+            aspect="auto",
+            origin="lower",
+            extent=extent,
+            cmap=divergence_cmap,
+            vmin=0,
+            vmax=1,
+            interpolation="nearest"
+        )
+
+        ax.legend(
+            handles=[
+                Patch(
+                    facecolor="#d62728",
+                    edgecolor="black",
+                    label="Diverged"
+                )
+            ],
+            loc="upper right"
+        )
+
+    beautify_plot(
+        ax,
+        "Hyperparameter Score (lower is better)",
+        "mu",
+        "L",
+        None,
+        None,
+        None,
+        None
+    )
+
+    # The colorbar now represents only non-divergent simulations
+    fig1.colorbar(
+        im,
+        label="Score (non-divergent simulations)"
+    )
+
     ax.set_yticks(np.arange(len(L_vals)))
     ax.set_yticklabels([str(int(L)) for L in L_vals])
-    ax.set_xticks(np.arange(len(mu_vals)))
-    ax.set_xticklabels([f"{m:.3g}" for m in mu_vals], rotation=45)
-    ax.set_xticks(np.arange(-0.5, len(mu_vals), 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, len(L_vals), 1), minor=True)
-    # Hide minor tick marks
-    ax.tick_params(which="minor", bottom=False, left=False)
-    # Draw grid above the heatmap
-    ax.set_axisbelow(False)
 
+    ax.set_xticks(np.arange(len(mu_vals)))
+    ax.set_xticklabels(
+        [f"{m:.3g}" for m in mu_vals],
+        rotation=45,
+        ha="right"
+    )
+
+    ax.set_xticks(
+        np.arange(-0.5, len(mu_vals), 1),
+        minor=True
+    )
+
+    ax.set_yticks(
+        np.arange(-0.5, len(L_vals), 1),
+        minor=True
+    )
+
+    ax.tick_params(
+        which="minor",
+        bottom=False,
+        left=False
+    )
+
+    ax.set_axisbelow(False)
     ax.grid(False)
-    ax.grid(which="minor", color="white", linestyle="-", linewidth=1.0)
+
+    ax.grid(
+        which="minor",
+        color="white",
+        linestyle="-",
+        linewidth=1.0
+    )
 
     if save_dir:
-        save_plot(fig1, save_dir, "param_heatmap.png")
+        save_plot(
+            fig1,
+            save_dir,
+            "param_heatmap.png"
+        )
+
     dispose_fig(fig1, plt, save_dir)
 
 def plot_convtime_vs_mu(ranked_for_combo, save_dir=None,
-                        algorithm_name="", noise_type=""):
+                        algorithm_name="", noise_type="",
+                        mu_scale="log"):
     """
-    For each μ: pick min conv_ms over all L. Plot conv_ms vs μ (log-x).
+    For each μ, select the minimum convergence time over all L.
+    Divergent simulations are excluded.
     """
+
     if not ranked_for_combo:
         return
 
-    # group by mu -> best conv
     best_by_mu = {}
+
     for r in ranked_for_combo:
+        # Do not use divergent simulations in this plot
+        is_diverged = (
+            bool(r.get("divergence", False))
+            or str(r.get("status", "")).strip().lower() == "diverged"
+        )
+
+        if is_diverged:
+            continue
+
         mu = float(r["mu"])
         conv = float(r.get("conv_ms", np.nan))
+
         if not np.isfinite(conv):
             continue
-        if (mu not in best_by_mu) or (conv < best_by_mu[mu]):
+
+        if (
+            mu not in best_by_mu
+            or conv < best_by_mu[mu]
+        ):
             best_by_mu[mu] = conv
 
-    mus = np.array(sorted(best_by_mu.keys()), dtype=float)
-    convs = np.array([best_by_mu[m] for m in mus], dtype=float)
+    if not best_by_mu:
+        return
 
-    fig, plt = _new_fig(headless=bool(save_dir), figsize=(10.5, 6.0), dpi=120)
-    fig.suptitle(f"Algo: {algorithm_name} | Noise: {noise_type}",
-                    fontsize=10.5, fontweight="bold", y=0.98)
+    mus = np.array(
+        sorted(best_by_mu.keys()),
+        dtype=float
+    )
+
+    convs = np.array(
+        [best_by_mu[m] for m in mus],
+        dtype=float
+    )
+
+    fig, plt = _new_fig(
+        headless=bool(save_dir),
+        figsize=(10.5, 6.0),
+        dpi=120
+    )
+
+    fig.suptitle(
+        f"Algo: {algorithm_name} | Noise: {noise_type}",
+        fontsize=10.5,
+        fontweight="bold",
+        y=0.98
+    )
+
     ax = fig.gca()
-    ax.plot(mus, convs, marker="o", linewidth=2.0, markersize=5, label="Best over L")
-    title = "Convergence time vs μ"
-    beautify_plot(ax, title, "μ", "Convergence time (ms)", 1e-5, 1, 0, 3000, xscale="log")
+
+    ax.plot(
+        mus,
+        convs,
+        marker="o",
+        linewidth=2.0,
+        markersize=5,
+        label="Best over L"
+    )
+
+    # Normalize the scale selected in the GUI
+    mu_scale = str(mu_scale).strip().lower()
+
+    if mu_scale not in ("log", "linear"):
+        mu_scale = "log"
+
+    # Set suitable horizontal margins for the selected scale
+    if mu_scale == "log":
+        x_left = max(
+            float(np.min(mus)) / 1.25,
+            np.finfo(float).tiny
+        )
+
+        x_right = float(np.max(mus)) * 1.25
+
+    else:
+        mu_span = float(np.max(mus) - np.min(mus))
+
+        x_margin = (
+            0.03 * mu_span
+            if mu_span > 0
+            else max(abs(float(mus[0])) * 0.05, 1e-12)
+        )
+
+        x_left = float(np.min(mus)) - x_margin
+        x_right = float(np.max(mus)) + x_margin
+
+    beautify_plot(
+        ax,
+        "Convergence time vs μ",
+        "μ",
+        "Convergence time (ms)",
+        x_left,
+        x_right,
+        None,
+        None,
+        xscale=mu_scale
+    )
+
+    # Use only the tested μ values as horizontal-axis ticks
+    ax.set_xticks(mus)
+
+    ax.set_xticklabels(
+        [f"{mu:.3g}" for mu in mus],
+        rotation=45,
+        ha="right",
+        fontsize=7
+    )
+
+    # Do not show additional minor ticks
+    ax.tick_params(
+        axis="x",
+        which="minor",
+        bottom=False,
+        labelbottom=False
+    )
+
+    ax.tick_params(
+        axis="x",
+        which="major",
+        bottom=True,
+        labelbottom=True
+    )
+
+    fig.tight_layout(
+        rect=[0, 0.06, 1, 0.97]
+    )
 
     if save_dir:
-        save_plot(fig, save_dir, "convtime_vs_mu.png")
+        save_plot(
+            fig,
+            save_dir,
+            "convtime_vs_mu.png"
+        )
+
     dispose_fig(fig, plt, save_dir)
 
 def plot_sse_vs_L(ranked_for_combo, save_dir=None,
@@ -597,7 +823,7 @@ def plot_sse_vs_L(ranked_for_combo, save_dir=None,
     ax = fig.gca()
     ax.plot(Ls, sses, marker="o", linewidth=2.0, markersize=5, label="Best over μ")
     title = "Steady-state error vs L"
-    beautify_plot(ax, title, "L (taps)", "SSE (dBr)", 2, 1024, -40, 0)
+    beautify_plot(ax, title, "L (taps)", "SSE (dBr)", 2, 1024, None, None)
 
     if save_dir:
         save_plot(fig, save_dir, "sse_vs_L.png")

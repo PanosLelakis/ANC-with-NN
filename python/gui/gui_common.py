@@ -35,6 +35,7 @@ class SharedState:
     nn_lr_var: tk.StringVar = None
 
     # NN model settings
+    nn_architecture_var: tk.StringVar = None
     nn_conv_layers_var: tk.StringVar = None
     nn_conv_channels_var: tk.StringVar = None
     nn_lstm_layers_var: tk.StringVar = None
@@ -147,11 +148,12 @@ def build_and_run():
     state.nn_backend_var = tk.StringVar(value="PyTorch")
 
     # NN model defaults
-    state.nn_conv_layers_var = tk.StringVar(value="5")  # Original encoder depth
-    state.nn_conv_channels_var = tk.StringVar(value="16,32,64,128,256")  # Original encoder channels
-    state.nn_lstm_layers_var = tk.StringVar(value="2")  # Original grouped LSTM depth
-    state.nn_lstm_hidden_var = tk.StringVar(value="1024")  # Original total recurrent width
-    state.nn_delay_m_var = tk.StringVar(value="0")  # Start with no prediction delay
+    state.nn_architecture_var = tk.StringVar(value="Original") # Original architecture
+    state.nn_conv_layers_var = tk.StringVar(value="5") # Original encoder depth
+    state.nn_conv_channels_var = tk.StringVar(value="16,32,64,128,256") # Original encoder channels
+    state.nn_lstm_layers_var = tk.StringVar(value="2") # Original grouped LSTM depth
+    state.nn_lstm_hidden_var = tk.StringVar(value="1024") # Original total recurrent width
+    state.nn_delay_m_var = tk.StringVar(value="0") # Start with no prediction delay
 
     # NN training defaults
     state.nn_target_fs_var = tk.StringVar(value="16000")

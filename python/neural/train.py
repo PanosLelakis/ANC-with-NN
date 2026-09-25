@@ -158,15 +158,49 @@ def parse_training_config(config):  # Convert GUI values to model configuration
         typed_config["hop_ms"] = 10  # Fix original frame shift
         typed_config["window_type"] = "hamming"  # Fix original STFT window
 
-    conv_channels = parse_conv_channels(  # Parse convolution channel string
-        typed_config["conv_channels"]  # Read configured channels
+    conv_channels = parse_conv_channels(
+        typed_config["conv_channels"]
     )
 
-    if len(conv_channels) != typed_config["conv_layers"]:  # Check channel count
-        raise ValueError(  # Reject inconsistent encoder configuration
+    # Require at least one convolutional layer
+    if typed_config["conv_layers"] <= 0:
+        raise ValueError(
+            "Conv layers must be positive"
+        )
+
+    # Require positive convolutional channels
+    if (
+        not conv_channels
+        or any(channel <= 0 for channel in conv_channels)
+    ):
+        raise ValueError(
+            "Conv channels must contain positive integers"
+        )
+
+    # Check number of channel values
+    if len(conv_channels) != typed_config["conv_layers"]:
+        raise ValueError(
             f"Conv layers must match conv channels. "
             f"Got conv_layers={typed_config['conv_layers']} "
             f"and conv_channels={typed_config['conv_channels']}"
+        )
+
+    # Require positive LSTM depth
+    if typed_config["lstm_layers"] <= 0:
+        raise ValueError(
+            "LSTM layers must be positive"
+        )
+
+    # Require positive LSTM hidden size
+    if typed_config["lstm_hidden"] <= 0:
+        raise ValueError(
+            "LSTM hidden size must be positive"
+        )
+
+    # Require non-negative frame delay
+    if typed_config["delay_m"] < 0:
+        raise ValueError(
+            "Delay M cannot be negative"
         )
 
     if typed_config["epochs"] <= 0:  # Check epoch count

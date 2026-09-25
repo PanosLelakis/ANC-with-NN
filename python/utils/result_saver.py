@@ -40,7 +40,19 @@ def save_case_artifacts(
     save_audio_file=True,
     bands_str=""
 ):
-    base = os.path.join(base_root, alg, safe_name(nlabel), f"L{int(L)}_mu{float(mu):.6g}")
+    noise_folder = os.path.join(
+        base_root,
+        alg,
+        safe_name(nlabel)
+    )
+
+    if alg == "Neural Network":
+        base = noise_folder
+    else:
+        base = os.path.join(
+            noise_folder,
+            f"L{int(L)}_mu{float(mu):.6g}"
+        )
     os.makedirs(base, exist_ok=True)
 
     diverged = bool(payload.get("divergence", False))
@@ -80,7 +92,7 @@ def save_case_artifacts(
         return meta
 
     if save_plots:
-        base_noise = os.path.join(base_root, alg, safe_name(nlabel))
+        base_noise = noise_folder
 
         if not os.path.exists(os.path.join(base_noise, "noise_spectrogram.pdf")):
             U.plot_noise_spectrogram(payload["noisy"], payload["fs"], save_dir=base_noise)
