@@ -1,21 +1,71 @@
-MIT License
+ACADEMIC EVALUATION SOURCE LICENSE  
+Version 1.0
 
-Copyright (c) 2025 Panos Lelakis
+Copyright (c) 2026 Panos Lelakis
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Scope
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This license applies to the original source code, documentation, and other materials contained in this repository (collectively, the “Software”), except for any third-party materials that are governed by their respective licenses.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+The Software is publicly available solely for inspection and non-commercial academic evaluation. Public availability does not place the Software in the public domain and does not constitute an open-source license.
+
+2. Limited Permission
+
+Subject to the terms of this license, permission is granted to access, view, download, and execute an unmodified copy of the Software solely for:
+
+(a) personal study; or  
+(b) non-commercial academic review and evaluation of the author’s thesis or related academic work.
+
+Any copy retained for these purposes must include this license and the original copyright notice.
+
+3. Restrictions
+
+Except where applicable law expressly provides otherwise, you may not:
+
+(a) use the Software, in whole or in part, for any commercial, professional, business, or revenue-generating purpose;
+
+(b) sell, license, sublicense, rent, lease, host, distribute, publish, or otherwise make the Software or any substantial part of it available to another person or organization;
+
+(c) modify, adapt, translate, reverse engineer, or create derivative works based on the Software;
+
+(d) incorporate the Software into another application, product, service, research platform, dataset, machine-learning system, or commercial offering;
+
+(e) use the Software to provide paid services, consulting, software-as-a-service, training, or other commercial activities; or
+
+(f) remove or alter any copyright, authorship, attribution, patent, or licensing notice.
+
+Any commercial use requires a separate written license signed by the copyright holder.
+
+4. Reservation of Commercial Rights
+
+All rights relating to the commercial exploitation of the Software are exclusively reserved by the copyright holder. No commercial rights are granted under this license.
+
+5. Patent Rights
+
+No patent license is granted, expressly or by implication, estoppel, or otherwise.
+
+All patent rights relating to any inventions, methods, systems, processes, or technical implementations embodied in or associated with the Software are expressly reserved.
+
+Nothing in this license grants permission to manufacture, use, sell, offer for sale, import, license, or otherwise commercially exploit any invention that may be protected by a patent or patent application owned or controlled by the copyright holder.
+
+6. Third-Party Materials
+
+This license applies only to materials for which the copyright holder owns the necessary rights. Third-party libraries, datasets, models, publications, algorithms, and other materials remain subject to their respective licenses, terms, and intellectual-property rights.
+
+7. Termination
+
+The permissions granted under this license terminate automatically if you breach any of its terms. Upon termination, you must stop using the Software and delete all copies in your possession or control, except where retention is required by applicable law.
+
+8. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, AND NON-INFRINGEMENT.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR RELATED TO THE SOFTWARE OR ITS USE.
+
+9. Commercial Licensing
+
+For commercial licensing requests, contact:
+
+Panos Lelakis
+plelakis@gmail.com
