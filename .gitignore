@@ -39,3 +39,5 @@ presentation
 plot_fxnlms_noise_effect.py
 plot_fxnlms_parameter_effect.py
 plot_fxnlms_vs_nn.py
+logs
+simple_audio_trimmer_fixed.py

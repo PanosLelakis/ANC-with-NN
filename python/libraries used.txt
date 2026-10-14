@@ -11,3 +11,4 @@ pandas
 torch
 onnx
 onnxruntime
+joblib
