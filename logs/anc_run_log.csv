@@ -1,3 +1,0 @@
-﻿sep=,
-ts,run_kind,stage,status,divergence,algorithm,source,noise_label,L,mu,conv_ms,sse_db,exec_time_s,power_anc_off,power_anc_on,save_path,message
-2026-09-03 12:01:22,single,single,ok,false,Neural Network,WAV,citynoise.wav,0,0,,-26.01,0.85,0.418,0.010,,
