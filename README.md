@@ -90,6 +90,8 @@ The neural implementation is based on **Hao Zhang and DeLiang Wang**, “Deep AN
 
 My contribution includes the simulation framework, GUI, adaptive-filter integration, training and evaluation workflows, parameter studies, and result visualization.
 
+[Read the full diploma thesis (PDF)](report/latex%20report/main.pdf).
+
 The project evaluates simulated acoustic systems. Results depend on the noise signals, acoustic paths, model configuration and experimental settings.
 
 ## License
