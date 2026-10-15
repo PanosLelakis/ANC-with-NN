@@ -6,7 +6,6 @@ eclass
 papers
 __pycache__
 progress reports
-report
 .vscode
 BDLib-2
 noise_train_esc50
@@ -34,6 +33,10 @@ noise_impact_2_latex.txt
 noise_impact_2.csv
 top10_results.csv
 *.pdf
+report/*
+!report/latex report/
+report/latex report/*
+!report/latex report/main.pdf
 results
 presentation
 plot_fxnlms_noise_effect.py
